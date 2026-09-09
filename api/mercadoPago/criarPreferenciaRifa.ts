@@ -1,11 +1,12 @@
 import { MercadoPagoConfig, Preference } from "mercadopago";
+import type { UtmMetadata } from "../types/origem.types.js";
 
 function getClient() {
     return new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN! });
 }
 
 export const mercadoPagoPreferenceClient = {
-    async criar() {
+    async criar(origem: UtmMetadata = {}) {
         const preference = new Preference(getClient());
         const FRONTEND_URL = process.env.FRONTEND_URL ?? "";
         const usaAutoReturn = FRONTEND_URL.startsWith("https://");
@@ -27,6 +28,12 @@ export const mercadoPagoPreferenceClient = {
                     failure: `${FRONTEND_URL}/pagamento-recusado`,
                 },
 
+                metadata: {
+                utm_source: origem.utmSource ?? null,
+                utm_medium: origem.utmMedium ?? null,
+                utm_campaign: origem.utmCampaign ?? "RIFA_SOLIDARIA",
+            },
+
                 payment_methods: {
                     installments: 2,
 
@@ -44,6 +51,6 @@ export const mercadoPagoPreferenceClient = {
     },
 };
 
-export async function criarPreferenciaRifa() {
-    return mercadoPagoPreferenceClient.criar();
+export async function criarPreferenciaRifa(origem: UtmMetadata = {}) {
+    return mercadoPagoPreferenceClient.criar(origem);
 }

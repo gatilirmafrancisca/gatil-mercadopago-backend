@@ -1,5 +1,5 @@
 import {type NextFunction, type Request, type Response} from "express";
-import { criarPreferenciaRifa } from "../mercadoPago/criarPreferencia.js";
+import { criarPreferenciaRifa } from "../mercadoPago/criarPreferenciaRifa.js";
 import { confirmarNumeroRifa, getAllRifasService } from "../services/rifa.service.js";
 import Rifa from "../models/Rifa.js";
 import * as RifaTypes from "../types/rifa.types.js";
@@ -7,18 +7,24 @@ import type { AuthenticatedRequest } from "../middlewares/token.middleware.js";
 import { enviarEmailConfirmacao } from "../services/email.service.js";
 
 
-export const getPreferencia = async(req: Request, res: Response) => {
+export const getPreferencia = async(_req: Request, res: Response, next: NextFunction) => {
 
-    const vagasOcupadas = await Rifa.countDocuments({
-        status: { $ne: "cancelado" satisfies RifaTypes.StatusRifaType },
-    });
- 
-    if (vagasOcupadas >= RifaTypes.TOTAL_NUMEROS) {
-        return res.status(409).json({ message: "Não há mais números disponíveis nesta rifa." });
+    
+    try {
+        const vagasOcupadas = await Rifa.countDocuments({
+            status: { $ne: "cancelado" satisfies RifaTypes.StatusRifaType },
+        });
+    
+        if (vagasOcupadas >= RifaTypes.TOTAL_NUMEROS) {
+            return res.status(409).json({ message: "Não há mais números disponíveis nesta rifa." });
+        }
+    
+        const preferencia = await criarPreferenciaRifa();
+        res.json({ initPoint: preferencia.init_point });
+
+    } catch (error) {
+        next(error);
     }
- 
-    const preferencia = await criarPreferenciaRifa();
-    res.json({ initPoint: preferencia.init_point });
 
 }
 

@@ -1,5 +1,5 @@
 import { mercadoPagoClient } from "../../api/mercadoPago/buscarPagamento.js";
-import { mercadoPagoPreferenceClient } from "../../api/mercadoPago/criarPreferencia.js";
+import { mercadoPagoPreferenceClient } from "../../api/mercadoPago/criarPreferenciaRifa.js";
 
 interface PagamentoFake {
     id: string;
