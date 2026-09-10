@@ -6,7 +6,7 @@ import { getChamadasCriarPreferencia } from "../support/mercadoPagoFake.js";
 Given("que existem {int} números já ocupados no banco", async function (quantidade: number) {
     const docs = Array.from({ length: quantidade }, (_, i) => ({
         paymentId: `SEED-${i}`,
-        status: "confirmado",
+        status: "APROVADO",
         amount: 100,
         claimedNumber: null,
     }));

@@ -2,17 +2,16 @@ import {type NextFunction, type Request, type Response} from "express";
 import * as doacaoService from "../services/doacao.service.js";
 import type { UtmMetadata } from "../types/origem.types.js";
 
-export const criarPagamento = async(req: Request<UtmMetadata, any, { valor: number }>, res: Response, next: NextFunction) => {
+export const criarPagamento = async(req: Request<UtmMetadata, any, { valor: number } & UtmMetadata>, res: Response, next: NextFunction) => {
 
     try {
 
-        const { valor } = req.body;
-        const utmSource = req.query.utmSource;
+        const { valor, utmSource, utmMedium, utmCampaign } = req.body;
 
         const origem: UtmMetadata = {
-            utmSource: (utmSource as string | undefined) ?? null,
-            utmMedium: (req.query.utmMedium as string | undefined) ?? null,
-            utmCampaign: (req.query.utmCampaign as string | undefined) ?? null,
+            utmSource: utmSource ?? null,
+            utmMedium: utmMedium ?? null,
+            utmCampaign: utmCampaign ?? null,
         };
 
         const resposta = await doacaoService.criarPreferenciaDoacao(valor, origem);

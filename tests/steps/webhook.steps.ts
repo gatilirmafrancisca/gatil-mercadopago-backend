@@ -33,7 +33,7 @@ async function aguardarDocumento(filtro: Record<string, unknown>, tentativas = 2
 }
 
 Given("que existe um pagamento aprovado {string} já registrado no banco", async function (paymentId: string) {
-    await Rifa.create({ paymentId, status: "confirmado", amount: 100, claimedNumber: null });
+    await Rifa.create({ paymentId, status: "APROVADO", amount: 100, claimedNumber: null });
 });
 
 When(

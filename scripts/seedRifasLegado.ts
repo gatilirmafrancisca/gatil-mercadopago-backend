@@ -38,7 +38,12 @@ async function main() {
     // ordered: false — se um documento específico falhar (ex: número
     // já existir de um teste anterior), os outros continuam sendo
     // inseridos, em vez de tudo parar no primeiro erro.
-    const resultado = await Rifa.insertMany(dadosLegado, {
+    const dadosParaInserir = dadosLegado.map((rifa) => ({
+        ...rifa,
+        status: rifa.status === "confirmado" ? "APROVADO" : rifa.status,
+    }));
+
+    const resultado = await Rifa.insertMany(dadosParaInserir, {
         ordered: false,
         rawResult: true,
     }).catch((err) => err); // insertMany com ordered:false lança mesmo com sucesso parcial
@@ -51,7 +56,7 @@ async function main() {
         if (falhas.length > 0) {
             console.log(`${falhas.length} falharam (provavelmente já existiam):`);
             for (const f of falhas) {
-                console.log(` - claimedNumber ${dadosLegado[f.index]?.claimedNumber}: ${f.errmsg}`);
+                console.log(` - claimedNumber ${dadosParaInserir[f.index]?.claimedNumber}: ${f.errmsg}`);
             }
         }
     } else {

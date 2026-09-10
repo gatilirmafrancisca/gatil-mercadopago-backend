@@ -6,11 +6,7 @@ import { InvalidEnumError, MissingParamsError } from "../utils/errors.js";
 
 
 
-function validarParametros(valor: number, utmSource: UtmSource | null, utmMedium: UtmMedium | null, utmCampaign: UtmCampaign | null) {
-
-    if (typeof valor !== "number" || !Number.isInteger(valor) || valor < 0) {
-        throw new MissingParamsError(`O campo 'valor' deve ser um número inteiro válido.`);
-    }
+export function validarParametros(utmSource: UtmSource | null, utmMedium: UtmMedium | null, utmCampaign: UtmCampaign | null) {
 
 
     if (utmSource !== undefined && utmSource !== null && !UTM_SOURCE.includes(utmSource as UtmSource)) {
@@ -37,32 +33,42 @@ function validarParametros(valor: number, utmSource: UtmSource | null, utmMedium
 
 }
 
+
+export function normalizarParametros(origem: UtmMetadata): UtmMetadata  {
+
+    const normalizarUtm = (valor?: string | null): string | null => {
+        const normalizado = valor?.trim().toUpperCase();
+        return normalizado || null;
+    };
+
+    const utmSource = normalizarUtm(origem.utmSource);
+    const utmMedium = normalizarUtm(origem.utmMedium);
+    const utmCampaign = normalizarUtm(origem.utmCampaign);
+
+    return {
+        utmSource: utmSource ?? null,
+        utmMedium: utmMedium ?? null,
+        utmCampaign: utmCampaign ?? null,
+    };
+}
+
+
 export const criarPreferenciaDoacao = async (valor: number, origem: UtmMetadata = {}) : Promise<ResponseType> => {
 
     try {
 
-        if (typeof valor !== "number" || !Number.isInteger(valor) || valor < 0) {
-        throw new MissingParamsError(`O campo 'valor' deve ser um número inteiro válido.`);
+        if (typeof valor !== "number" || !Number.isFinite(valor) || valor < 0) {
+            throw new MissingParamsError(`O campo 'valor' deve ser um número inteiro válido.`);
         }
+
 
         if (typeof origem !== "object" || origem === null) {
             throw new MissingParamsError(`O campo 'origem' deve ser um objeto válido.`);
         }
 
-        const utmSource = typeof origem.utmSource === "string"
-            ? origem.utmSource.toUpperCase()
-            : origem.utmSource;
-        
-        const utmMedium = typeof origem.utmMedium === "string"
+        const { utmSource, utmMedium, utmCampaign } = normalizarParametros(origem);
 
-            ? origem.utmMedium.toUpperCase()
-            : origem.utmMedium;
-
-        const utmCampaign = typeof origem.utmCampaign === "string"
-            ? origem.utmCampaign.toUpperCase()
-            : origem.utmCampaign;
-        
-        validarParametros(valor, utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
+        validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
 
         const origemNormalizada: UtmMetadata = { 
             ...origem, 

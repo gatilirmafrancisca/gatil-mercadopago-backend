@@ -6,6 +6,7 @@ interface PagamentoFake {
     status: string;
     transaction_amount: number;
     payer?: { email?: string };
+    metadata?: { utm_campaign?: string };
 }
 
 const pagamentosFake = new Map<string, PagamentoFake>();
