@@ -40,9 +40,6 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
         // Nunca confiar no corpo do webhook para status/valor — buscar o
         // dado real na API do Mercado Pago.
         const pagamento = await buscarPagamento(data.id);
-        
-        
-        console.log(pagamento);
 
 
         // CENÁRIO DA RIFA SOLIDÁRIA
