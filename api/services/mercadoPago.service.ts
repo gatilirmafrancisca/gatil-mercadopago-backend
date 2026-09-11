@@ -41,6 +41,10 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
         // dado real na API do Mercado Pago.
         const pagamento = await buscarPagamento(data.id);
         
+        
+        console.log(pagamento);
+
+
         // CENÁRIO DA RIFA SOLIDÁRIA
         if (pagamento.metadata?.utm_campaign == UTM_CAMPAIGN[1]) {
 
@@ -56,7 +60,7 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
         await sincronizarFinanceiro({
             
             mercadoPagoId: String(pagamento.id),
-            valor: pagamento.transaction_amount,
+            valor: pagamento.transaction_details?.net_received_amount,
             status: mapearStatusMP(pagamento.status ?? "pending"),
             utmSource: pagamento.metadata?.utm_source ?? "",
             utmMedium: pagamento.metadata?.utm_medium ?? "",
