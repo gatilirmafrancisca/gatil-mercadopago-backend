@@ -108,6 +108,11 @@ export async function sincronizarFinanceiro(payload: IPayload) {
   });
 
   if (!response.ok) {
-    console.error("[financeiroSync] falha ao sincronizar", payload.mercadoPagoId, await response.text());
+        const responseBody = await response.text();
+        throw new Error(
+            `[financeiroSync] painel respondeu ${response.status}: ${responseBody}`,
+        );
   }
+
+    console.info("[financeiroSync] transferência sincronizada", payload.mercadoPagoId);
 }
