@@ -28,13 +28,13 @@ function extrairCaminho(comando: string): string {
 // ---------- cenários individuais ----------
 
 Given("que tenho um token válido para o pagamento {string}", async function (this: any, paymentId: string) {
-    await Rifa.create({ paymentId, status: "confirmado", amount: 100, claimedNumber: null });
+    await Rifa.create({ paymentId, status: "APROVADO", amount: 100, claimedNumber: null });
     this.token = criarToken(paymentId);
     this.paymentId = paymentId;
 });
 
 Given("que tenho um token expirado para o pagamento {string}", async function (this: any, paymentId: string) {
-    await Rifa.create({ paymentId, status: "confirmado", amount: 100, claimedNumber: null });
+    await Rifa.create({ paymentId, status: "APROVADO", amount: 100, claimedNumber: null });
     this.token = criarToken(paymentId, "-10s");
 });
 
@@ -115,7 +115,7 @@ Given(
     "que tenho tokens válidos para os pagamentos {string} e {string}",
     async function (id1: string, id2: string) {
         for (const paymentId of [id1, id2]) {
-            await Rifa.create({ paymentId, status: "confirmado", amount: 100, claimedNumber: null });
+            await Rifa.create({ paymentId, status: "APROVADO", amount: 100, claimedNumber: null });
             tokensCorrida[paymentId] = criarToken(paymentId);
         }
     }
