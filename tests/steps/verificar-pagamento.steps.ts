@@ -5,14 +5,14 @@ import Rifa from "../../api/models/Rifa.js";
 Given(
     "que existe um pagamento confirmado {string} no banco, sem número escolhido",
     async function (paymentId: string) {
-        await Rifa.create({ paymentId, status: "confirmado", amount: 100, claimedNumber: null });
+        await Rifa.create({ paymentId, status: "APROVADO", amount: 100, claimedNumber: null });
     }
 );
 
 Given(
     "que existe um pagamento confirmado {string} no banco, com claimedNumber {int}",
     async function (paymentId: string, numero: number) {
-        await Rifa.create({ paymentId, status: "confirmado", amount: 100, claimedNumber: numero });
+        await Rifa.create({ paymentId, status: "APROVADO", amount: 100, claimedNumber: numero });
     }
 );
 

@@ -1,11 +1,12 @@
 import { mercadoPagoClient } from "../../api/mercadoPago/buscarPagamento.js";
-import { mercadoPagoPreferenceClient } from "../../api/mercadoPago/criarPreferencia.js";
+import { mercadoPagoPreferenceClient } from "../../api/mercadoPago/criarPreferenciaRifa.js";
 
 interface PagamentoFake {
     id: string;
     status: string;
     transaction_amount: number;
     payer?: { email?: string };
+    metadata?: { utm_campaign?: string };
 }
 
 const pagamentosFake = new Map<string, PagamentoFake>();

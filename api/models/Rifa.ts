@@ -12,6 +12,10 @@ export interface IRifa {
     email: string | null;
 
     claimedNumber: number | null;
+
+    utmSource: string | null;
+    utmMedium: string | null;
+    utmCampaign: string | null;
 }
 
 const RifaSchema: Schema<IRifa> = new mongoose.Schema({
@@ -24,6 +28,10 @@ const RifaSchema: Schema<IRifa> = new mongoose.Schema({
     email: { type: String, default: null },
 
     claimedNumber: { type: Number, default: null },
+
+    utmSource: { type: String, default: null },
+    utmMedium: { type: String, default: null },
+    utmCampaign: { type: String, default: null },
 });
 
 RifaSchema.index(

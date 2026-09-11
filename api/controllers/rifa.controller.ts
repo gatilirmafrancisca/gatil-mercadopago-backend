@@ -1,24 +1,44 @@
 import {type NextFunction, type Request, type Response} from "express";
-import { criarPreferenciaRifa } from "../mercadoPago/criarPreferencia.js";
+import { criarPreferenciaRifa } from "../mercadoPago/criarPreferenciaRifa.js";
 import { confirmarNumeroRifa, getAllRifasService } from "../services/rifa.service.js";
 import Rifa from "../models/Rifa.js";
 import * as RifaTypes from "../types/rifa.types.js";
 import type { AuthenticatedRequest } from "../middlewares/token.middleware.js";
 import { enviarEmailConfirmacao } from "../services/email.service.js";
+import type { UtmCampaign, UtmMedium, UtmSource, UtmMetadata } from "../types/origem.types.js";
+import { normalizarParametros, validarParametros } from "../services/doacao.service.js";
 
 
-export const getPreferencia = async(req: Request, res: Response) => {
+export const getPreferencia = async(req: Request<UtmMetadata, any, any>, res: Response, next: NextFunction) => {
+    
+    try {
 
-    const vagasOcupadas = await Rifa.countDocuments({
-        status: { $ne: "cancelado" satisfies RifaTypes.StatusRifaType },
-    });
- 
-    if (vagasOcupadas >= RifaTypes.TOTAL_NUMEROS) {
-        return res.status(409).json({ message: "Não há mais números disponíveis nesta rifa." });
+        const origem: UtmMetadata = {
+
+            utmSource: (req.query.utmSource as string | undefined) ?? null,
+            utmMedium: (req.query.utmMedium as string | undefined) ?? null,
+            utmCampaign: (req.query.utmCampaign as string | undefined) ?? null,
+        };
+
+        const origemNormalizada = normalizarParametros(origem);
+        const { utmSource, utmMedium, utmCampaign } = origemNormalizada;
+
+        validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
+
+        const vagasOcupadas = await Rifa.countDocuments({
+            status: { $ne: "CANCELADO" satisfies RifaTypes.StatusRifaType },
+        });
+    
+        if (vagasOcupadas >= RifaTypes.TOTAL_NUMEROS) {
+            return res.status(409).json({ message: "Não há mais números disponíveis nesta rifa." });
+        }
+    
+        const preferencia = await criarPreferenciaRifa(origemNormalizada);
+        res.json({ initPoint: preferencia.init_point });
+
+    } catch (error) {
+        next(error);
     }
- 
-    const preferencia = await criarPreferenciaRifa();
-    res.json({ initPoint: preferencia.init_point });
 
 }
 

@@ -68,7 +68,7 @@ export const VerificarPagamentoController = async (req: Request, res: Response) 
             return res.status(500).json({ message: "Não foi possível confirmar o pagamento agora." });
         }
 
-        if (pagamento.status !== "confirmado") {
+        if (pagamento.status !== "APROVADO") {
             return res.status(402).json({ message: "Pagamento não aprovado." });
         }
         if (pagamento.claimedNumber !== null) {
