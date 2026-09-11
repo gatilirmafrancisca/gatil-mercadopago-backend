@@ -22,8 +22,13 @@ export const WebhookController = async (req: Request, res: Response) => {
         return res.status(401).json({ message: "Assinatura inválida." });
     }
 
-    res.status(200).end();
-    void processarNotificacaoPagamento(req.body);
+    try {
+        await processarNotificacaoPagamento(req.body);
+        return res.status(200).end();
+    } catch (error) {
+        console.error("[webhook mercadopago] erro não tratado", error);
+        return res.status(500).json({ message: "Falha ao processar webhook." });
+    }
 };
 
 export const VerificarPagamentoController = async (req: Request, res: Response) => {
