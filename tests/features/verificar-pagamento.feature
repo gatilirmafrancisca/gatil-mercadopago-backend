@@ -27,3 +27,16 @@ Funcionalidade: Verificação de pagamento e emissão de token
   Cenário: payment_id ausente é rejeitado
     Quando eu chamo "GET /mercadopago/verificar-pagamento"
     Então a resposta HTTP deve ser 400
+
+  Cenário: PIX gravado como pendente e já aprovado no Mercado Pago gera token
+    Dado que existe um pagamento "999014" registrado no banco como "PENDENTE"
+    E que existe um pagamento aprovado "999014" na API do Mercado Pago
+    Quando eu chamo "GET /mercadopago/verificar-pagamento?payment_id=999014"
+    Então a resposta deve conter um campo "token"
+    E deve existir um documento com paymentId "999014" e status "APROVADO"
+
+  Cenário: PIX gravado como pendente e ainda pendente no Mercado Pago não gera token
+    Dado que existe um pagamento "999015" registrado no banco como "PENDENTE"
+    E que existe um pagamento com status "pending" "999015" na API do Mercado Pago
+    Quando eu chamo "GET /mercadopago/verificar-pagamento?payment_id=999015"
+    Então a resposta HTTP deve ser 402

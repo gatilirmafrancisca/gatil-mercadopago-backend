@@ -7,6 +7,10 @@ import doacaoRoute from "./routes/doacao.route.js";
 
 export const app = express();
 
+// Na Vercel a requisição chega via proxy — sem isso req.ip é o IP do
+// proxy e o rate limit trataria todos os usuários como um só.
+app.set("trust proxy", 1);
+
 app.use(express.json());
 app.use(
   cors({ origin: process.env.FRONTEND_URL, credentials: true })
