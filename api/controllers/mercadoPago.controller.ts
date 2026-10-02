@@ -1,11 +1,10 @@
 import { type Request, type Response } from "express";
 import { verificarAssinaturaMP } from "../mercadoPago/verificarAssinatura.js";
 import { processarNotificacaoPagamento, mapearStatusMP } from "../services/mercadoPago.service.js";
-import { registrarPagamentoRifa } from "../services/rifa.service.js";
+import { sincronizarPagamentoRifa } from "../services/rifa.service.js";
 import Rifa, { type IRifa } from "../models/Rifa.js";
 import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
 import * as RifaTypes from "../types/rifa.types.js";
-import { ConflictError } from "../utils/errors.js";
 import jwt from "jsonwebtoken";
 
 const { sign } = jwt;
@@ -39,8 +38,11 @@ export const VerificarPagamentoController = async (req: Request, res: Response) 
 
         let pagamento = await Rifa.findOne({ paymentId });
 
-        if (!pagamento) {
-            
+        // Sem registro (webhook ainda não chegou) ou registro ainda não
+        // aprovado (ex: PIX gravado como PENDENTE e o webhook de
+        // aprovação atrasou/falhou): consulta o dado real no MP.
+        if (!pagamento || pagamento.status !== "APROVADO") {
+
             const dadoReal = await buscarPagamento(paymentId);
             if (dadoReal.status !== "approved") {
                 return res.status(402).json({ message: "Pagamento não aprovado." });
@@ -52,21 +54,8 @@ export const VerificarPagamentoController = async (req: Request, res: Response) 
                 ...(dadoReal.payer?.email ? { email: dadoReal.payer.email } : {}),
             };
 
-            try {
-                
-                await registrarPagamentoRifa(paymentId, dadosCriacao);
-                pagamento = await Rifa.findOne({ paymentId });
-
-            } catch (error) {
-                if (error instanceof ConflictError) {
-
-                    pagamento = await Rifa.findOne({ paymentId });
-                } else {
-                    
-                    throw error;
-                }
-            }
-        
+            await sincronizarPagamentoRifa(paymentId, dadosCriacao);
+            pagamento = await Rifa.findOne({ paymentId });
         }
         
         if (!pagamento) {

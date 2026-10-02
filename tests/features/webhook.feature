@@ -23,3 +23,8 @@ Funcionalidade: Recebimento de notificações do Mercado Pago
     Dado que existe um pagamento com status "rejected" "999003" na API do Mercado Pago
     Quando o backend recebe uma notificação de webhook para "999003" com assinatura válida
     Então deve existir um documento com paymentId "999003" e status "CANCELADO"
+  Cenário: PIX notificado primeiro como pendente e depois aprovado atualiza o status
+    Dado que existe um pagamento "999004" registrado no banco como "PENDENTE"
+    E que existe um pagamento aprovado "999004" na API do Mercado Pago
+    Quando o backend recebe uma notificação de webhook para "999004" com assinatura válida
+    Então deve existir um documento com paymentId "999004" e status "APROVADO"
