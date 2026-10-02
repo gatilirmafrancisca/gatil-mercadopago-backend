@@ -1,7 +1,7 @@
 import * as RifaTypes from "../types/rifa.types.js";
 import type { IRifa } from "../models/Rifa.js";
 import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
-import { registrarPagamentoRifa } from "./rifa.service.js";
+import { sincronizarPagamentoRifa } from "./rifa.service.js";
 import { ConflictError } from "../utils/errors.js";
 import { UTM_CAMPAIGN } from "../types/origem.types.js";
 
@@ -51,7 +51,7 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
                 ...(pagamento.payer?.email ? { email: pagamento.payer.email } : {}),
             };
 
-            await registrarPagamentoRifa(String(pagamento.id), dadosCriacao);
+            await sincronizarPagamentoRifa(String(pagamento.id), dadosCriacao);
         }
         
         await sincronizarFinanceiro({

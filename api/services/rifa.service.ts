@@ -44,7 +44,37 @@ export const registrarPagamentoRifa = async (
 };
 
 
-export const confirmarNumeroRifa = async (paymentId: string, data: Record<string, any>): Promise<ResponseType> => {
+/**
+ * Registra o pagamento ou, se ele já existir, atualiza o status com o
+ * dado real do Mercado Pago. Necessário pro PIX: o MP notifica primeiro
+ * com "pending" e só depois com "approved" — sem essa atualização o
+ * registro ficava PENDENTE pra sempre e a pessoa não conseguia escolher
+ * o número.
+ */
+export const sincronizarPagamentoRifa = async (
+    paymentId: string,
+    dadosBase: Partial<Omit<IRifa, "paymentId">>
+): Promise<void> => {
+    try {
+        await registrarPagamentoRifa(paymentId, dadosBase);
+    } catch (error) {
+        if (!(error instanceof ConflictError)) throw error;
+
+        await Rifa.updateOne(
+            { paymentId },
+            { $set: { status: dadosBase.status } },
+            { runValidators: true }
+        );
+
+        // Só preenche o e-mail do MP se o participante ainda não informou um.
+        if (dadosBase.email) {
+            await Rifa.updateOne({ paymentId, email: null }, { $set: { email: dadosBase.email } });
+        }
+    }
+};
+
+
+export const confirmarNumeroRifa =async (paymentId: string, data: Record<string, any>): Promise<ResponseType> => {
     try {
         const dadosNormalizados = normalizarDadosConfirmacaoRifa(data);
         await validarConfirmacaoRifa(dadosNormalizados);
