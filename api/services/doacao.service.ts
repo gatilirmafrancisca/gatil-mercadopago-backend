@@ -1,6 +1,7 @@
 import { mercadoPagoDoacaoClient } from "../mercadoPago/criarPreferenciaDoacao.js";
 import { UTM_SOURCE, type UtmSource, type UtmMetadata, UTM_MEDIUM, type UtmMedium, type UtmCampaign, UTM_CAMPAIGN } from "../types/origem.types.js";
 import type ResponseType from "../types/response.type.js";
+import { normalizarRastreio, type RastreioMetadata } from "../types/rastreio.types.js";
 import { InvalidEnumError, MissingParamsError } from "../utils/errors.js";
 
 
@@ -53,7 +54,11 @@ export function normalizarParametros(origem: UtmMetadata): UtmMetadata  {
 }
 
 
-export const criarPreferenciaDoacao = async (valor: number, origem: UtmMetadata = {}) : Promise<ResponseType> => {
+export const criarPreferenciaDoacao = async (
+    valor: number,
+    origem: UtmMetadata = {},
+    rastreio: RastreioMetadata = normalizarRastreio(undefined, undefined, undefined),
+) : Promise<ResponseType> => {
 
     try {
 
@@ -76,7 +81,7 @@ export const criarPreferenciaDoacao = async (valor: number, origem: UtmMetadata 
             utmMedium: utmMedium?.toUpperCase() ?? null,
             utmCampaign: utmCampaign?.toUpperCase() ?? null
         };
-        const preferencia = await mercadoPagoDoacaoClient.criar(valor, origemNormalizada);
+        const preferencia = await mercadoPagoDoacaoClient.criar(valor, origemNormalizada, rastreio);
 
         if(!preferencia || !preferencia.init_point) {
 

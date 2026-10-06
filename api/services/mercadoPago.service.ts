@@ -4,6 +4,7 @@ import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
 import { sincronizarPagamentoRifa } from "./rifa.service.js";
 import { ConflictError } from "../utils/errors.js";
 import { UTM_CAMPAIGN } from "../types/origem.types.js";
+import { registrarConversaoDoacao } from "./conversao.service.js";
 
 
 interface IPayload {
@@ -53,23 +54,14 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
 
             await sincronizarPagamentoRifa(String(pagamento.id), dadosCriacao);
         }
-        
-        await sincronizarFinanceiro({
-            
-            mercadoPagoId: String(pagamento.id),
-            valor: pagamento.transaction_details?.net_received_amount,
-            status: mapearStatusMP(pagamento.status ?? "pending"),
-            utmSource: pagamento.metadata?.utm_source ?? "",
-            utmMedium: pagamento.metadata?.utm_medium ?? "",
-            utmCampaign: pagamento.metadata?.utm_campaign ?? "",
-            nomeDoador: pagamento.payer?.first_name ?? "Anônimo",
-            ...(pagamento.payer?.email
-                ? { emailDoador: pagamento.payer.email }
-            : {}),
-            ...(pagamento.description
-            ? { descricao: pagamento.description }
-            : {}),
-        });
+
+        // CENÁRIO DA DOAÇÃO — conversão para Meta/GA4. Falha aqui não pode
+        // impedir o registro financeiro abaixo.
+        await registrarConversaoDoacao(pagamento).catch((err) =>
+            console.error("[conversao] falha ao reportar doação", data.id, err)
+        );
+
+        await sincronizarFinanceiroDoPagamento(pagamento);
 
     } catch (err) {
 
@@ -83,6 +75,26 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
         console.error("[webhook mercadopago] falha ao processar", data.id, err);
     }
 };
+
+/** Envia ao painel o estado atual de um pagamento buscado na API do MP. */
+export async function sincronizarFinanceiroDoPagamento(pagamento: Awaited<ReturnType<typeof buscarPagamento>>) {
+    await sincronizarFinanceiro({
+
+        mercadoPagoId: String(pagamento.id),
+        valor: pagamento.transaction_details?.net_received_amount,
+        status: mapearStatusMP(pagamento.status ?? "pending"),
+        utmSource: pagamento.metadata?.utm_source ?? "",
+        utmMedium: pagamento.metadata?.utm_medium ?? "",
+        utmCampaign: pagamento.metadata?.utm_campaign ?? "",
+        nomeDoador: pagamento.payer?.first_name ?? "Anônimo",
+        ...(pagamento.payer?.email
+            ? { emailDoador: pagamento.payer.email }
+        : {}),
+        ...(pagamento.description
+        ? { descricao: pagamento.description }
+        : {}),
+    });
+}
 
 export async function sincronizarFinanceiro(payload: IPayload) {
 
