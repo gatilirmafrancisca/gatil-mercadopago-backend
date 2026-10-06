@@ -1,6 +1,6 @@
 import { type Request, type Response } from "express";
 import { verificarAssinaturaMP } from "../mercadoPago/verificarAssinatura.js";
-import { processarNotificacaoPagamento, mapearStatusMP } from "../services/mercadoPago.service.js";
+import { processarNotificacaoPagamento, mapearStatusMP, sincronizarFinanceiroDoPagamento } from "../services/mercadoPago.service.js";
 import { sincronizarPagamentoRifa } from "../services/rifa.service.js";
 import Rifa, { type IRifa } from "../models/Rifa.js";
 import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
@@ -55,6 +55,13 @@ export const VerificarPagamentoController = async (req: Request, res: Response) 
             };
 
             await sincronizarPagamentoRifa(paymentId, dadosCriacao);
+
+            // O webhook que atualizaria o painel atrasou/falhou: atualiza por
+            // aqui também. Se o painel estiver fora, a pessoa segue o fluxo.
+            await sincronizarFinanceiroDoPagamento(dadoReal).catch((err) =>
+                console.error("[verificar-pagamento] falha ao sincronizar painel", paymentId, err)
+            );
+
             pagamento = await Rifa.findOne({ paymentId });
         }
         
