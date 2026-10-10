@@ -5,6 +5,18 @@ function getClient() {
     return new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN! });
 }
 
+/**
+ * Páginas de retorno do checkout da rifa. Ficam sob /rifa para não se
+ * misturarem com as da doação (/doar/pagamento-*).
+ */
+export function backUrlsRifa(frontendUrl: string) {
+    return {
+        success: `${frontendUrl}/rifa/pagamento-aprovado`,
+        pending: `${frontendUrl}/rifa/pagamento-pendente`,
+        failure: `${frontendUrl}/rifa/pagamento-recusado`,
+    };
+}
+
 export const mercadoPagoPreferenceClient = {
     async criar(origem: UtmMetadata = {}) {
         const preference = new Preference(getClient());
@@ -22,11 +34,7 @@ export const mercadoPagoPreferenceClient = {
                         currency_id: "BRL",
                     },
                 ],
-                back_urls: {
-                    success: `${FRONTEND_URL}/pagamento-aprovado`,
-                    pending: `${FRONTEND_URL}/pagamento-pendente`,
-                    failure: `${FRONTEND_URL}/pagamento-recusado`,
-                },
+                back_urls: backUrlsRifa(FRONTEND_URL),
 
                 metadata: {
                 utm_source: origem.utmSource ?? null,
