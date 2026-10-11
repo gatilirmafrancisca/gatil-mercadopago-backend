@@ -16,7 +16,7 @@ API que sustenta a Ação Solidária de 10 anos do Gatil Irmã Francisca: recebe
 ## Como o sistema funciona, em uma volta
 
 1. A pessoa vê o vídeo no Instagram/TikTok e acessa `/rifa/pagar` (frontend), que pede ao backend uma preferência de pagamento nova e redireciona pro Mercado Pago.
-2. Ela paga (cartão ou PIX). O Mercado Pago notifica o backend por dois canais independentes: o **webhook** (assíncrono, sempre chega) e o **redirect** (`back_urls`, só chega se ela voltar — automático no cartão, manual no PIX).
+2. Ela paga (cartão ou PIX). O Mercado Pago notifica o backend por dois canais independentes: o **webhook** (assíncrono, sempre chega) e o **redirect** (`back_urls` → `/rifa/pagamento-aprovado`, `/rifa/pagamento-pendente` ou `/rifa/pagamento-recusado`; só chega se ela voltar — automático no cartão, manual no PIX).
 3. O webhook cria um registro no banco com o que o Mercado Pago garante (`paymentId`, `status`, `amount`) — `name`, `phone`, `email` e `claimedNumber` nascem `null`.
 4. A pessoa cai na tela de escolha do número. O frontend chama `verificar-pagamento`, que confirma o pagamento (com o banco ou, se o webhook ainda não chegou, ao vivo na API do Mercado Pago) e devolve um **token de curta duração**.
 5. Com esse token, ela escolhe um número e confirma — o backend só aceita se o `claimedNumber` daquele pagamento específico ainda estiver livre (índice único no banco garante isso mesmo sob concorrência).
@@ -151,6 +151,9 @@ Cucumber + `supertest` batendo direto no `app` do Express (sem subir servidor nu
 **`estoque.feature`**
 - Com números disponíveis, a preferência é criada normalmente
 - Com os 500 números esgotados, a criação é bloqueada (409) e nenhuma preferência chega a ser criada no Mercado Pago
+
+**`retorno-rifa.feature`**
+- As `back_urls` da preferência da rifa apontam para `/rifa/pagamento-aprovado`, `/rifa/pagamento-pendente` e `/rifa/pagamento-recusado` — separadas das páginas de retorno da doação (`/doar/pagamento-aprovado`, `/doar/pagamento-pendente` e `/doar/pagamento-recusado`)
 
 ## CI/CD
 

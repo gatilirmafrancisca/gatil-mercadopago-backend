@@ -7,6 +7,17 @@ function getClient() {
   return new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN! });
 }
 
+/**
+ * Páginas de retorno do checkout da doação. Ficam sob /doar, separadas das
+ * da rifa (/rifa/pagamento-*).
+ */
+export function backUrlsDoacao(frontendUrl: string) {
+  return {
+    success: `${frontendUrl}/doar/pagamento-aprovado`,
+    pending: `${frontendUrl}/doar/pagamento-pendente`,
+    failure: `${frontendUrl}/doar/pagamento-recusado`,
+  };
+}
 
 export const mercadoPagoDoacaoClient = {
   async criar(
@@ -33,11 +44,7 @@ export const mercadoPagoDoacaoClient = {
             currency_id: "BRL",
           },
         ],
-        back_urls: {
-          success: `${FRONTEND_URL}/doacao-confirmada`,
-          pending: `${FRONTEND_URL}/doacao-pendente`,
-          failure: `${FRONTEND_URL}/doar`,
-        },
+        back_urls: backUrlsDoacao(FRONTEND_URL),
 
 
         external_reference: rastreioId,
