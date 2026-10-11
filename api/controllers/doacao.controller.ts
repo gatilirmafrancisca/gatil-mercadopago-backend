@@ -25,3 +25,16 @@ export const criarPagamento = async(req: Request<UtmMetadata, any, { valor: numb
         next(error);
     }
 }
+
+export const arrecadadoMes = async(req: Request, res: Response, next: NextFunction) => {
+
+    try {
+
+        const resposta = await doacaoService.buscarArrecadadoMes();
+        return res.status(resposta.status).json({ message: resposta.message, data: resposta.data });
+
+    } catch (error) {
+
+        next(error);
+    }
+}

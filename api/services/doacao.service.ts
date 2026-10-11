@@ -103,3 +103,68 @@ export const criarPreferenciaDoacao = async (
 
      }
 }
+
+
+/** Mês e ano atuais no fuso de Brasília (o servidor na Vercel roda em UTC). */
+function mesAtualBrasilia(): { mes: number; ano: number } {
+    const partes = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Sao_Paulo",
+        year: "numeric",
+        month: "numeric",
+    }).formatToParts(new Date());
+
+    return {
+        mes: Number(partes.find((p) => p.type === "month")?.value),
+        ano: Number(partes.find((p) => p.type === "year")?.value),
+    };
+}
+
+/**
+ * Total arrecadado no mês corrente APENAS com doações do site: entradas
+ * aprovadas via Mercado Pago, sem pagamentos da rifa solidária. O filtro é
+ * aplicado pelo painel via query params (categoria=DOACAO exclui a rifa).
+ */
+export const buscarArrecadadoMes = async (): Promise<ResponseType> => {
+
+    try {
+
+        const PAINEL_ADM_URL = process.env.PAINEL_ADM_URL!;
+        const INTERNAL_SECRET = process.env.PAINEL_ADM_INTERNAL_SECRET!;
+
+        const { mes, ano } = mesAtualBrasilia();
+        const params = new URLSearchParams({
+            categoria: "DOACAO",
+            status: "APROVADO",
+            metodoPagamento: "MERCADO_PAGO",
+            mes: String(mes),
+            ano: String(ano),
+            agregar: "total",
+        });
+
+        const response = await fetch(`${PAINEL_ADM_URL}/financeiro/interno/transferencias?${params}`, {
+            headers: { "x-internal-secret": INTERNAL_SECRET },
+        });
+
+        if (!response.ok) {
+            throw new Error(`[arrecadadoMes] painel respondeu ${response.status}: ${await response.text()}`);
+        }
+
+        const body = await response.json() as { data?: { total?: number } };
+        const total = Number(body.data?.total);
+
+        if (!Number.isFinite(total)) {
+            throw new Error("[arrecadadoMes] painel devolveu um total inválido.");
+        }
+
+        return {
+            status: 200,
+            message: "Total arrecadado em doações no mês.",
+            data: { total }
+        };
+
+    } catch (error: any) {
+
+        console.error("Erro ao buscar total arrecadado no mês:", error);
+        throw error;
+    }
+}
