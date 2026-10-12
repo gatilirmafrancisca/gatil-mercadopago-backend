@@ -19,6 +19,17 @@ export function backUrlsDoacao(frontendUrl: string) {
   };
 }
 
+/**
+ * Formas aceitas no Checkout Pro: só cartão. O Pix é gerado dentro do site
+ * (criarPixDoacao.ts / criarPixRifa.ts), onde a tela acompanha o pagamento;
+ * boleto (ticket) nunca foi aceito.
+ */
+export const PAGAMENTOS_SO_CARTAO = {
+  installments: 2,
+  excluded_payment_types: [{ id: "ticket" }, { id: "bank_transfer" }],
+  excluded_payment_methods: [{ id: "pix" }],
+};
+
 export const mercadoPagoDoacaoClient = {
   async criar(
     valor: number,
@@ -59,10 +70,7 @@ export const mercadoPagoDoacaoClient = {
           ...rastreio,
         },
 
-        payment_methods: {
-          installments: 2,
-          excluded_payment_types: [{ id: "ticket" }],
-        },
+        payment_methods: PAGAMENTOS_SO_CARTAO,
 
         ...(usaAutoReturn ? { auto_return: "approved" as const } : {}),
         statement_descriptor: "GATIL IRMA FRANCISCA",

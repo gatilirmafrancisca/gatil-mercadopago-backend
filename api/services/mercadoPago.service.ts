@@ -16,6 +16,7 @@ interface IPayload {
     utmMedium: string;
     utmCampaign: string;
     nomeDoador: string;
+    dataConfirmacao: string;
     emailDoador?: string;
     descricao?: string;
 }
@@ -33,6 +34,17 @@ export const mapearStatusMP = (statusMP: string): RifaTypes.StatusRifaType => {
     return mapa[statusMP] ?? "PENDENTE";
 }
 
+type Pagamento = Awaited<ReturnType<typeof buscarPagamento>>;
+
+const CAMPANHA_RIFA = UTM_CAMPAIGN[1];
+
+/**
+ * Pagamento da rifa: criado pela preferência ou pelo Pix da rifa (tipo
+ * "RIFA"), ou por preferências antigas que só tinham utm_campaign.
+ */
+export const ehPagamentoRifa = (pagamento: Pagamento): boolean =>
+    pagamento.metadata?.tipo === "RIFA" || pagamento.metadata?.utm_campaign === CAMPANHA_RIFA;
+
 export const processarNotificacaoPagamento = async (body: any): Promise<void> => {
     const { type, data } = body ?? {};
     if (type !== "payment" || !data?.id) return;
@@ -44,7 +56,7 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
 
 
         // CENÁRIO DA RIFA SOLIDÁRIA
-        if (pagamento.metadata?.utm_campaign == UTM_CAMPAIGN[1]) {
+        if (ehPagamentoRifa(pagamento)) {
 
             const dadosCriacao: Partial<Omit<IRifa, "paymentId">> = {
                 status: mapearStatusMP(pagamento.status!),
@@ -77,16 +89,23 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
 };
 
 /** Envia ao painel o estado atual de um pagamento buscado na API do MP. */
-export async function sincronizarFinanceiroDoPagamento(pagamento: Awaited<ReturnType<typeof buscarPagamento>>) {
+export async function sincronizarFinanceiroDoPagamento(pagamento: Pagamento) {
     await sincronizarFinanceiro({
 
         mercadoPagoId: String(pagamento.id),
-        valor: pagamento.transaction_details?.net_received_amount,
+        // Líquido (já sem a taxa do MP). Enquanto o pagamento está pendente
+        // (ex: Pix aguardando) o MP ainda não informa o líquido, e o painel
+        // exige um valor: vai o bruto, e a aprovação sobrescreve.
+        valor: pagamento.transaction_details?.net_received_amount || pagamento.transaction_amount,
         status: mapearStatusMP(pagamento.status ?? "pending"),
         utmSource: pagamento.metadata?.utm_source ?? "",
         utmMedium: pagamento.metadata?.utm_medium ?? "",
-        utmCampaign: pagamento.metadata?.utm_campaign ?? "",
+        // O painel separa a rifa das doações (categoria=DOACAO) por esse campo.
+        utmCampaign: ehPagamentoRifa(pagamento) ? CAMPANHA_RIFA : (pagamento.metadata?.utm_campaign ?? ""),
         nomeDoador: pagamento.payer?.first_name ?? "Anônimo",
+        // Data do pagamento, não da sincronização: retries do webhook e a
+        // consulta do Pix não podem mudar o mês em que a entrada conta.
+        dataConfirmacao: pagamento.date_approved ?? pagamento.date_created ?? new Date().toISOString(),
         ...(pagamento.payer?.email
             ? { emailDoador: pagamento.payer.email }
         : {}),
@@ -114,7 +133,6 @@ export async function sincronizarFinanceiro(payload: IPayload) {
         ...payload,
         metodoPagamento: "MERCADO_PAGO",
         tipo: "ENTRADA",
-        dataConfirmacao: new Date().toISOString(),
     }),
 
   });

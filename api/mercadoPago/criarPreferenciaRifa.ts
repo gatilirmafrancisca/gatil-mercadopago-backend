@@ -1,5 +1,6 @@
 import { MercadoPagoConfig, Preference } from "mercadopago";
 import type { UtmMetadata } from "../types/origem.types.js";
+import { PAGAMENTOS_SO_CARTAO } from "./criarPreferenciaDoacao.js";
 
 function getClient() {
     return new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN! });
@@ -36,21 +37,17 @@ export const mercadoPagoPreferenceClient = {
                 ],
                 back_urls: backUrlsRifa(FRONTEND_URL),
 
+                // tipo + utm_campaign fixos: é por eles que o webhook reconhece a
+                // rifa e que o painel separa a rifa das doações. A campanha do
+                // link (utm_campaign) não pode sobrescrever isso.
                 metadata: {
-                utm_source: origem.utmSource ?? null,
-                utm_medium: origem.utmMedium ?? null,
-                utm_campaign: origem.utmCampaign ?? "RIFA_SOLIDARIA",
-            },
-
-                payment_methods: {
-                    installments: 2,
-
-                    excluded_payment_types: [
-                    {
-                        id: "ticket",
-                    },
-                ],
+                    tipo: "RIFA",
+                    utm_source: origem.utmSource ?? null,
+                    utm_medium: origem.utmMedium ?? null,
+                    utm_campaign: "RIFA_SOLIDARIA",
                 },
+
+                payment_methods: PAGAMENTOS_SO_CARTAO,
 
                 ...(usaAutoReturn ? { auto_return: "approved" as const } : {}),
                 statement_descriptor: "GATIL IRMA FRANCISCA",

@@ -1,25 +1,43 @@
 import { mercadoPagoClient } from "../../api/mercadoPago/buscarPagamento.js";
 import { mercadoPagoPreferenceClient } from "../../api/mercadoPago/criarPreferenciaRifa.js";
+import { mercadoPagoDoacaoClient } from "../../api/mercadoPago/criarPreferenciaDoacao.js";
 import { mercadoPagoPixClient } from "../../api/mercadoPago/criarPixDoacao.js";
+import { mercadoPagoPixRifaClient } from "../../api/mercadoPago/criarPixRifa.js";
 
 interface PagamentoFake {
     id: string;
     status: string;
     status_detail?: string;
     transaction_amount: number;
+    transaction_details?: { net_received_amount?: number };
+    description?: string;
     external_reference?: string;
+    date_created?: string;
+    date_approved?: string;
     date_of_expiration?: string;
-    payer?: { email?: string };
-    metadata?: { utm_campaign?: string; tipo?: string; rastreio_id?: string; valor_esperado?: number };
+    payer?: { email?: string; first_name?: string };
+    metadata?: {
+        utm_source?: string | null;
+        utm_medium?: string | null;
+        utm_campaign?: string | null;
+        tipo?: string;
+        rastreio_id?: string;
+        valor_esperado?: number;
+    };
 }
 
 const pagamentosFake = new Map<string, PagamentoFake>();
 let chamadasCriarPreferencia = 0;
 const pedidosPix: Parameters<typeof mercadoPagoPixClient.criar>[0][] = [];
+const pedidosPixRifa: Parameters<typeof mercadoPagoPixRifaClient.criar>[0][] = [];
 
 // Guardado antes de ser trocado pela fake: os testes do corpo enviado ao
 // Mercado Pago chamam a função real, com o SDK interceptado.
 export const criarPixReal = mercadoPagoPixClient.criar;
+export const criarPixRifaReal = mercadoPagoPixRifaClient.criar;
+// A preferência da doação não é trocada por fake; a da rifa é.
+export const criarPreferenciaRealRifa = mercadoPagoPreferenceClient.criar;
+export const criarPreferenciaRealDoacao = mercadoPagoDoacaoClient.criar;
 
 export const PIX_FAKE = {
     id: 777000111,
@@ -41,6 +59,10 @@ export function getPedidosPix() {
     return pedidosPix;
 }
 
+export function getPedidosPixRifa() {
+    return pedidosPixRifa;
+}
+
 /**
  * Chamado no Before de cada cenário — troca as chamadas reais do
  * Mercado Pago pelas fakes, e limpa o estado do cenário anterior.
@@ -49,6 +71,7 @@ export function resetarFakesMercadoPago() {
     pagamentosFake.clear();
     chamadasCriarPreferencia = 0;
     pedidosPix.length = 0;
+    pedidosPixRifa.length = 0;
 
     mercadoPagoClient.buscarPagamento = async (paymentId: string) => {
         const encontrado = pagamentosFake.get(paymentId);
@@ -67,6 +90,19 @@ export function resetarFakesMercadoPago() {
 
     mercadoPagoPixClient.criar = async (dados) => {
         pedidosPix.push(dados);
+        return {
+            id: PIX_FAKE.id,
+            status: "pending",
+            external_reference: PIX_FAKE.rastreioId,
+            date_of_expiration: PIX_FAKE.expiraEm,
+            point_of_interaction: {
+                transaction_data: { qr_code: PIX_FAKE.qrCode, qr_code_base64: PIX_FAKE.qrCodeBase64 },
+            },
+        } as any;
+    };
+
+    mercadoPagoPixRifaClient.criar = async (dados) => {
+        pedidosPixRifa.push(dados);
         return {
             id: PIX_FAKE.id,
             status: "pending",
