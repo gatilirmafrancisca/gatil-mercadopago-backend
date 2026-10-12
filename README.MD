@@ -15,8 +15,10 @@ API que sustenta a Ação Solidária de 10 anos do Gatil Irmã Francisca: recebe
 
 ## Como o sistema funciona, em uma volta
 
-1. A pessoa vê o vídeo no Instagram/TikTok e acessa `/rifa/pagar` (frontend), que pede ao backend uma preferência de pagamento nova e redireciona pro Mercado Pago.
-2. Ela paga (cartão ou PIX). O Mercado Pago notifica o backend por dois canais independentes: o **webhook** (assíncrono, sempre chega) e o **redirect** (`back_urls` → `/rifa/pagamento-aprovado`, `/rifa/pagamento-pendente` ou `/rifa/pagamento-recusado`; só chega se ela voltar — automático no cartão, manual no PIX).
+1. A pessoa vê o vídeo no Instagram/TikTok e acessa `/rifa` (frontend), uma landing onde escolhe **PIX** ou **cartão**:
+   - **PIX** (com `VITE_PIX_NO_SITE=true` no frontend): `POST /api/rifa/criar-pix` cria o Pix no Mercado Pago (valor do bilhete definido aqui) e a tela mostra o QR code, consultando `GET /api/rifa/status-pix/:paymentId?ref=` até aprovar. Aprovado, o front leva pra `/rifa/pagamento-aprovado?payment_id=...`.
+   - **Cartão**: `GET /api/rifa/criar-pagamento` cria uma preferência (Checkout Pro, **só cartão** — o Pix fica só dentro do site) e redireciona pro Mercado Pago.
+2. O Mercado Pago notifica o backend pelo **webhook** (assíncrono, sempre chega). No cartão, o **redirect** (`back_urls` → `/rifa/pagamento-aprovado`, `/rifa/pagamento-pendente` ou `/rifa/pagamento-recusado`) traz a pessoa de volta.
 3. O webhook cria um registro no banco com o que o Mercado Pago garante (`paymentId`, `status`, `amount`) — `name`, `phone`, `email` e `claimedNumber` nascem `null`.
 4. A pessoa cai na tela de escolha do número. O frontend chama `verificar-pagamento`, que confirma o pagamento (com o banco ou, se o webhook ainda não chegou, ao vivo na API do Mercado Pago) e devolve um **token de curta duração**.
 5. Com esse token, ela escolhe um número e confirma — o backend só aceita se o `claimedNumber` daquele pagamento específico ainda estiver livre (índice único no banco garante isso mesmo sob concorrência).
@@ -104,13 +106,19 @@ Cadastre a URL gerada no painel do Mercado Pago (**Webhooks → aba Modo de prod
 |---|---|---|---|
 | `POST` | `/mercadopago/webhook` | assinatura HMAC (`x-signature`) | Recebe notificação do Mercado Pago, registra o pagamento |
 | `GET` | `/mercadopago/verificar-pagamento?payment_id=` | — | Confirma o pagamento e emite o token de posse |
-| `GET` | `/api/rifa/criar-pagamento` | — | Checa estoque e cria uma nova Preferência no Mercado Pago |
+| `GET` | `/api/rifa/criar-pagamento` | — | Checa estoque e cria uma nova Preferência no Mercado Pago (só cartão) |
+| `POST` | `/api/rifa/criar-pix` | rate limit | Checa estoque e cria o Pix do bilhete (`{ email, utm* }`) — devolve QR code, copia e cola, `rastreioId` e expiração |
+| `GET` | `/api/rifa/status-pix/:paymentId?ref=` | rate limit | Status do Pix da rifa (`PENDENTE`, `APROVADO`, `CANCELADO`, `EXPIRADO`); `ref` = `rastreioId` |
 | `GET` | `/api/rifa/numeros-ocupados` | — | Lista os números já escolhidos, pra pintar a grade |
 | `POST` | `/api/rifa/confirmar-numero` | `Bearer <token>` | Reserva um número pro pagamento dono do token |
 | `POST` | `/api/rifa/reenviar-email` | — | Reenvia o e-mail de confirmação de um pagamento já resolvido |
 | `GET` | `/api/rifa/buscar-por-email` | — | Recupera o `payment_id` de uma compra perdida, por e-mail |
 
 ## Regras de negócio que valem saber antes de mexer
+
+- **Pix só dentro do site.** As preferências (Checkout Pro) de doação e de rifa excluem Pix e boleto (`PAGAMENTOS_SO_CARTAO`). O Pix é criado por `criarPixDoacao.ts` / `criarPixRifa.ts`, com `external_reference` = `rastreio_id` — a consulta de status exige esse `ref` e o `metadata.tipo` certo (`DOACAO` ou `RIFA`).
+- **Rifa é sempre `utm_campaign = RIFA_SOLIDARIA` + `metadata.tipo = RIFA`**, mesmo que o link traga outra campanha: é assim que o webhook registra o bilhete e que o painel separa a rifa das doações (`categoria=DOACAO` = tudo que não é `RIFA_SOLIDARIA`).
+- **Envio ao painel** (`POST {PAINEL_ADM_URL}/financeiro/interno/mercadopago`): `valor` é o líquido (`net_received_amount`) — enquanto pendente, o bruto (o painel exige valor; a aprovação sobrescreve) —, `dataConfirmacao` é a data de aprovação no Mercado Pago (não a hora do envio) e o painel faz upsert por `mercadoPagoId`.
 
 - **`paymentId` é único; `claimedNumber` também é único, mas por índice *parcial*** (`partialFilterExpression: { claimedNumber: { $type: "number" } }`) — um índice `sparse` comum quebraria isso, porque trata `null` como valor presente, não ausente.
 - **A confirmação de número nunca confia em `paymentId` vindo do corpo da requisição** — só o que está codificado dentro do JWT verificado pelo middleware conta.
@@ -151,6 +159,18 @@ Cucumber + `supertest` batendo direto no `app` do Express (sem subir servidor nu
 **`estoque.feature`**
 - Com números disponíveis, a preferência é criada normalmente
 - Com os 500 números esgotados, a criação é bloqueada (409) e nenhuma preferência chega a ser criada no Mercado Pago
+
+**`pix-rifa.feature`**
+- Pix da rifa criado com o valor do bilhete (o valor do navegador é ignorado), `tipo RIFA`, `utm_campaign RIFA_SOLIDARIA`, expiração em -03:00 e idempotência
+- Dados inválidos (400) e estoque esgotado (409) não criam Pix
+- Status acompanha o Mercado Pago (inclusive expirado); Pix de doação e da rifa não se cruzam; `ref` de outra pessoa dá 404
+- Jornada: Pix aprovado → `verificar-pagamento` devolve o token e registra o bilhete
+
+**`preferencias-sem-pix.feature`**
+- As preferências de doação e de rifa só aceitam cartão (sem Pix nem boleto); a rifa fica sempre na campanha da rifa
+
+**`financeiro-painel.feature`**
+- O que vai ao painel: rifa (cartão e Pix) como `RIFA_SOLIDARIA`, doação fora dela, valor líquido, bruto enquanto pendente, data da aprovação
 
 **`retorno-rifa.feature`**
 - As `back_urls` da preferência da rifa apontam para `/rifa/pagamento-aprovado`, `/rifa/pagamento-pendente` e `/rifa/pagamento-recusado` — separadas das páginas de retorno da doação (`/doar/pagamento-aprovado`, `/doar/pagamento-pendente` e `/doar/pagamento-recusado`)

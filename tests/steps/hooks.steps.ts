@@ -3,6 +3,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
 import Rifa from "../../api/models/Rifa.js";
 import { resetarFakesMercadoPago } from "../support/mercadoPagoFake.js";
+import { PAINEL_URL_TESTE, resetarPainelFake } from "../support/painelFake.js";
 
 BeforeAll(function () {
     // Só define se ainda não existir — em CI, o workflow já define
@@ -13,6 +14,9 @@ BeforeAll(function () {
     process.env.MP_WEBHOOK_SECRET ??= "segredo-webhook-teste";
     process.env.RESEND_API_KEY ??= "re_fake_teste";
     process.env.EMAIL_FROM ??= "Teste <teste@example.com>";
+    // Sempre o fake: os testes nunca falam com o painel de verdade.
+    process.env.PAINEL_ADM_URL = PAINEL_URL_TESTE;
+    process.env.PAINEL_ADM_INTERNAL_SECRET ??= "segredo-painel-teste";
 });
 
 let mongod: MongoMemoryServer;
@@ -29,6 +33,7 @@ Before(async function () {
     await Rifa.init();
 
     resetarFakesMercadoPago();
+    resetarPainelFake();
 });
 
 After(async function () {

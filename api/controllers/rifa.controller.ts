@@ -1,8 +1,7 @@
 import {type NextFunction, type Request, type Response} from "express";
 import { criarPreferenciaRifa } from "../mercadoPago/criarPreferenciaRifa.js";
-import { confirmarNumeroRifa, getAllRifasService } from "../services/rifa.service.js";
+import { confirmarNumeroRifa, consultarStatusPixRifa, criarPixRifa, getAllRifasService, haNumerosDisponiveis } from "../services/rifa.service.js";
 import Rifa from "../models/Rifa.js";
-import * as RifaTypes from "../types/rifa.types.js";
 import type { AuthenticatedRequest } from "../middlewares/token.middleware.js";
 import { enviarEmailConfirmacao } from "../services/email.service.js";
 import type { UtmCampaign, UtmMedium, UtmSource, UtmMetadata } from "../types/origem.types.js";
@@ -25,11 +24,7 @@ export const getPreferencia = async(req: Request<UtmMetadata, any, any>, res: Re
 
         validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
 
-        const vagasOcupadas = await Rifa.countDocuments({
-            status: { $ne: "CANCELADO" satisfies RifaTypes.StatusRifaType },
-        });
-    
-        if (vagasOcupadas >= RifaTypes.TOTAL_NUMEROS) {
+        if (!(await haNumerosDisponiveis())) {
             return res.status(409).json({ message: "Não há mais números disponíveis nesta rifa." });
         }
     
@@ -40,6 +35,38 @@ export const getPreferencia = async(req: Request<UtmMetadata, any, any>, res: Re
         next(error);
     }
 
+}
+
+export const criarPix = async(req: Request<any, any, { email: string } & UtmMetadata>, res: Response, next: NextFunction) => {
+
+    try {
+
+        const { email, utmSource, utmMedium, utmCampaign } = req.body ?? {};
+
+        const origem: UtmMetadata = {
+            utmSource: utmSource ?? null,
+            utmMedium: utmMedium ?? null,
+            utmCampaign: utmCampaign ?? null,
+        };
+
+        const resposta = await criarPixRifa({ email, origem });
+        return res.status(resposta.status).json({ message: resposta.message, data: resposta.data });
+
+    } catch (error) {
+        next(error);
+    }
+}
+
+export const statusPix = async(req: Request<{ paymentId: string }>, res: Response, next: NextFunction) => {
+
+    try {
+
+        const resposta = await consultarStatusPixRifa(req.params.paymentId, req.query.ref);
+        return res.status(resposta.status).json({ message: resposta.message, data: resposta.data });
+
+    } catch (error) {
+        next(error);
+    }
 }
 
 export const confirmarNumero = async(req: AuthenticatedRequest, res: Response, next: NextFunction) => {
