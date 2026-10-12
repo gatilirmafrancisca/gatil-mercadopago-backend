@@ -183,6 +183,60 @@ const UUID_VALIDO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 
 export type StatusPix = "APROVADO" | "PENDENTE" | "CANCELADO" | "EXPIRADO";
 
+type Pagamento = Awaited<ReturnType<typeof buscarPagamento>>;
+
+/** E-mail do pagador do Pix (o Mercado Pago exige). Usado também pela rifa. */
+export function validarEmailPix(email: unknown): string {
+    const emailNormalizado = typeof email === "string" ? email.trim() : "";
+    if (emailNormalizado.length > 254 || !EMAIL_VALIDO.test(emailNormalizado)) {
+        throw new MissingParamsError(`O campo 'email' deve ser um e-mail válido.`);
+    }
+    return emailNormalizado;
+}
+
+/**
+ * Valida os parâmetros da consulta de status e busca o pagamento no Mercado
+ * Pago. O ref (rastreioId) precisa bater com o external_reference: o
+ * paymentId é sequencial, e sem essa conferência daria pra consultar
+ * pagamentos de outras pessoas. tipo separa o Pix da doação do da rifa.
+ */
+export async function buscarPixDoSite(paymentId: unknown, ref: unknown, tipo: "DOACAO" | "RIFA"): Promise<Pagamento> {
+
+    if (typeof paymentId !== "string" || !/^\d{1,20}$/.test(paymentId)) {
+        throw new InvalidIdError("paymentId inválido.");
+    }
+
+    if (typeof ref !== "string" || !UUID_VALIDO.test(ref)) {
+        throw new InvalidIdError("ref inválido.");
+    }
+
+    let pagamento: Pagamento;
+    try {
+        pagamento = await buscarPagamento(paymentId);
+    } catch (error: any) {
+        if (error?.status === 404) throw new NotFoundError("Pix não encontrado.");
+        throw error;
+    }
+
+    if (pagamento.external_reference !== ref || pagamento.metadata?.tipo !== tipo) {
+        throw new NotFoundError("Pix não encontrado.");
+    }
+
+    return pagamento;
+}
+
+/** Status do Pix pro front: o mapearStatusMP, mais EXPIRADO. */
+export function statusDoPix(pagamento: Pagamento): StatusPix {
+
+    const venceu = pagamento.date_of_expiration
+        ? Date.parse(pagamento.date_of_expiration) <= Date.now()
+        : false;
+
+    if (pagamento.status === "cancelled" && pagamento.status_detail === "expired") return "EXPIRADO";
+    if (pagamento.status === "pending" && venceu) return "EXPIRADO";
+    return mapearStatusMP(pagamento.status ?? "pending") as StatusPix;
+}
+
 interface CriarPixArgs {
     valor: unknown;
     email: unknown;
@@ -207,10 +261,7 @@ export const criarPix = async ({
         // conversão (conversao.service.ts) só é reportada se os dois baterem.
         const valorPix = Math.round(valor * 100) / 100;
 
-        const emailNormalizado = typeof email === "string" ? email.trim() : "";
-        if (emailNormalizado.length > 254 || !EMAIL_VALIDO.test(emailNormalizado)) {
-            throw new MissingParamsError(`O campo 'email' deve ser um e-mail válido.`);
-        }
+        const emailNormalizado = validarEmailPix(email);
 
         const origemNormalizada = normalizarParametros(origem);
         const { utmSource, utmMedium, utmCampaign } = origemNormalizada;
@@ -250,45 +301,11 @@ export const criarPix = async ({
     }
 }
 
-/**
- * Status de um Pix criado pelo site. O ref (rastreioId) precisa bater com o
- * external_reference: o paymentId é sequencial, e sem essa conferência daria
- * pra consultar pagamentos de outras pessoas.
- */
+/** Status de um Pix de doação criado pelo site. */
 export const consultarStatusPix = async (paymentId: unknown, ref: unknown): Promise<ResponseType> => {
 
-    if (typeof paymentId !== "string" || !/^\d{1,20}$/.test(paymentId)) {
-        throw new InvalidIdError("paymentId inválido.");
-    }
-
-    if (typeof ref !== "string" || !UUID_VALIDO.test(ref)) {
-        throw new InvalidIdError("ref inválido.");
-    }
-
-    let pagamento: Awaited<ReturnType<typeof buscarPagamento>>;
-    try {
-        pagamento = await buscarPagamento(paymentId);
-    } catch (error: any) {
-        if (error?.status === 404) throw new NotFoundError("Pix não encontrado.");
-        throw error;
-    }
-
-    if (pagamento.external_reference !== ref || pagamento.metadata?.tipo !== "DOACAO") {
-        throw new NotFoundError("Pix não encontrado.");
-    }
-
-    const venceu = pagamento.date_of_expiration
-        ? Date.parse(pagamento.date_of_expiration) <= Date.now()
-        : false;
-
-    let status: StatusPix;
-    if (pagamento.status === "cancelled" && pagamento.status_detail === "expired") {
-        status = "EXPIRADO";
-    } else if (pagamento.status === "pending" && venceu) {
-        status = "EXPIRADO";
-    } else {
-        status = mapearStatusMP(pagamento.status ?? "pending") as StatusPix;
-    }
+    const pagamento = await buscarPixDoSite(paymentId, ref, "DOACAO");
+    const status = statusDoPix(pagamento);
 
     if (status === "APROVADO") {
         // O webhook é quem registra a doação; isso só cobre o caso de ele
