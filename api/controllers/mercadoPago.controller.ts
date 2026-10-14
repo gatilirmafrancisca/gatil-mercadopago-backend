@@ -1,6 +1,6 @@
 import { type Request, type Response } from "express";
 import { verificarAssinaturaMP } from "../mercadoPago/verificarAssinatura.js";
-import { processarNotificacaoPagamento, mapearStatusMP, sincronizarFinanceiroDoPagamento } from "../services/mercadoPago.service.js";
+import { processarNotificacaoPagamento, mapearStatusMP, sincronizarFinanceiroDoPagamento, ehPagamentoRifa } from "../services/mercadoPago.service.js";
 import { sincronizarPagamentoRifa } from "../services/rifa.service.js";
 import Rifa, { type IRifa } from "../models/Rifa.js";
 import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
@@ -44,6 +44,13 @@ export const VerificarPagamentoController = async (req: Request, res: Response) 
         if (!pagamento || pagamento.status !== "APROVADO") {
 
             const dadoReal = await buscarPagamento(paymentId);
+
+            // Só pagamento da rifa vira número: sem isso, o payment_id de
+            // uma doação (de qualquer valor) liberava a escolha de um número.
+            if (!ehPagamentoRifa(dadoReal)) {
+                return res.status(402).json({ message: "Este pagamento não é da rifa." });
+            }
+
             if (dadoReal.status !== "approved") {
                 return res.status(402).json({ message: "Pagamento não aprovado." });
             }

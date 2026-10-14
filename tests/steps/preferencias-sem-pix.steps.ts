@@ -54,3 +54,9 @@ Then(
         assert.equal(this.argsMP.body.metadata.utm_campaign, campanha);
     }
 );
+
+Then("a preferência deve ter external_reference igual ao rastreio_id do metadata", function (this: any) {
+    const { external_reference, metadata } = this.argsMP.body;
+    assert.ok(external_reference, "faltou o external_reference");
+    assert.equal(external_reference, metadata.rastreio_id);
+});

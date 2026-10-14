@@ -12,6 +12,7 @@
     "start:database": "docker compose up -d",
     "generate-secret-key": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
     "migrate:rifa-status": "tsx scripts/migrarRifasStatus.ts",
+    "recuperar:rifa": "tsx scripts/recuperarPagamentosRifa.ts",
     "test:bdd": "tsx node_modules/@cucumber/cucumber/bin/cucumber-js"
   },
   "dependencies": {
