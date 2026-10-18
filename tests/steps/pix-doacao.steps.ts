@@ -15,19 +15,22 @@ When(
     async function (this: any, valor: number, email: string, origem: string) {
         this.lastResponse = await request(app)
             .post("/api/doacao/criar-pix")
+            .set("X-Forwarded-For", this.ipCenario)
             .send({ valor, email, utmSource: origem, utmMedium: "organico" });
     }
 );
 
 When("eu envio {string} com o corpo {}", async function (this: any, comando: string, corpo: string) {
     const [, caminho] = comando.split(" ") as [string, string];
-    this.lastResponse = await request(app).post(caminho).send(JSON.parse(corpo));
+    this.lastResponse = await request(app).post(caminho).set("X-Forwarded-For", this.ipCenario).send(JSON.parse(corpo));
 });
 
 Then(
     "a resposta deve trazer o Pix com paymentId, rastreioId, qrCode, qrCodeBase64 e expiraEm",
     function (this: any) {
-        assert.deepEqual(this.lastResponse.body.data, {
+        // O Pix da rifa também devolve valor e teste (pix-rifa.steps.ts).
+        const { paymentId, rastreioId, qrCode, qrCodeBase64, expiraEm } = this.lastResponse.body.data;
+        assert.deepEqual({ paymentId, rastreioId, qrCode, qrCodeBase64, expiraEm }, {
             paymentId: PIX_FAKE.id,
             rastreioId: PIX_FAKE.rastreioId,
             qrCode: PIX_FAKE.qrCode,

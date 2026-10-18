@@ -18,6 +18,10 @@ export function errorHandler(err: any, req: Request, res: Response, next: NextFu
         return res.status(401).json({ message: err.message });
     }
 
+    if (err.name === "ForbiddenError") {
+        return res.status(403).json({ message: err.message });
+    }
+
     if (err.name === "NotFoundError") {
         return res.status(404).json({ message: err.message });
     }

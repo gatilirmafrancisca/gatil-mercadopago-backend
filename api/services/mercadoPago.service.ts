@@ -50,6 +50,27 @@ export const ehPagamentoRifa = (pagamento: Pagamento): boolean =>
     || pagamento.metadata?.utm_campaign === CAMPANHA_RIFA
     || pagamento.description === RifaTypes.DESCRICAO_RIFA;
 
+/** Pix de teste de R$ 0,01 (ver criarPixRifa.ts). */
+export const ehPagamentoTeste = (pagamento: Pagamento): boolean =>
+    pagamento.metadata?.teste === true || pagamento.metadata?.teste === "true";
+
+/**
+ * O que o banco da rifa guarda de um pagamento do MP. O valor é o do
+ * bilhete — no Pix de teste, o valor cobrado (R$ 0,01).
+ */
+export const dadosRifaDoPagamento = (
+    pagamento: Pagamento,
+    status: RifaTypes.StatusRifaType = mapearStatusMP(pagamento.status ?? "pending"),
+): Partial<Omit<IRifa, "paymentId">> => {
+    const teste = ehPagamentoTeste(pagamento);
+    return {
+        status,
+        amount: teste ? (pagamento.transaction_amount ?? 0) : RifaTypes.TICKET_PRICE_BRL,
+        teste,
+        ...(pagamento.payer?.email ? { email: pagamento.payer.email } : {}),
+    };
+};
+
 export const processarNotificacaoPagamento = async (body: any): Promise<void> => {
     const { type, data } = body ?? {};
     if (type !== "payment" || !data?.id) return;
@@ -62,14 +83,7 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
 
         // CENÁRIO DA RIFA SOLIDÁRIA
         if (ehPagamentoRifa(pagamento)) {
-
-            const dadosCriacao: Partial<Omit<IRifa, "paymentId">> = {
-                status: mapearStatusMP(pagamento.status!),
-                amount: RifaTypes.TICKET_PRICE_BRL,
-                ...(pagamento.payer?.email ? { email: pagamento.payer.email } : {}),
-            };
-
-            await sincronizarPagamentoRifa(String(pagamento.id), dadosCriacao);
+            await sincronizarPagamentoRifa(String(pagamento.id), dadosRifaDoPagamento(pagamento));
         }
 
         // CENÁRIO DA DOAÇÃO — conversão para Meta/GA4. Falha aqui não pode
@@ -119,7 +133,7 @@ export async function sincronizarFinanceiroDoPagamento(pagamento: Pagamento, sta
             ? { emailDoador: pagamento.payer.email }
         : {}),
         ...(pagamento.description
-        ? { descricao: pagamento.description }
+        ? { descricao: `${ehPagamentoTeste(pagamento) ? "[TESTE] " : ""}${pagamento.description}` }
         : {}),
     });
 }

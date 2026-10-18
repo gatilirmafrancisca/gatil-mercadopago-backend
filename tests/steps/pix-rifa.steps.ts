@@ -30,6 +30,7 @@ When(
     async function (this: any, email: string, origem: string) {
         this.lastResponse = await request(app)
             .post("/api/rifa/criar-pix")
+            .set("X-Forwarded-For", this.ipCenario)
             .send({ email, utmSource: origem, utmMedium: "organico" });
     }
 );
@@ -56,7 +57,7 @@ Then("nenhum Pix da rifa deve ter sido pedido ao Mercado Pago", function () {
 
 // ---------- corpo enviado ao Mercado Pago (SDK interceptado) ----------
 
-async function montarPixRifa(world: any, email: string, utmCampaign: string | null) {
+async function montarPixRifa(world: any, email: string, utmCampaign: string | null, teste = false) {
     const original = Payment.prototype.create;
     Payment.prototype.create = async function (args: any) {
         return args;
@@ -66,6 +67,7 @@ async function montarPixRifa(world: any, email: string, utmCampaign: string | nu
         world.argsMP = await criarPixRifaReal({
             email,
             origem: { utmSource: "INSTAGRAM", utmMedium: null, utmCampaign },
+            teste,
         });
     } finally {
         Payment.prototype.create = original;
@@ -141,3 +143,63 @@ When(
         this.lastResponse = await request(app).get(`/api/rifa/status-pix/${paymentId}?ref=${ref}`);
     }
 );
+
+// ---------- Pix de teste (R$ 0,01) ----------
+
+Given("que a chave do Pix de teste é {string}", function (chave: string) {
+    process.env.PIX_TESTE_CHAVE = chave;
+});
+
+When(
+    "eu peço um Pix da rifa de teste para {string} com a chave {string}",
+    async function (this: any, email: string, chave: string) {
+        this.lastResponse = await request(app)
+            .post("/api/rifa/criar-pix")
+            .set("X-Forwarded-For", this.ipCenario)
+            .set("x-pix-teste", chave)
+            .send({ email, utmSource: "instagram", utmMedium: "organico" });
+    }
+);
+
+When("o pagamento Pix da rifa de teste para {string} é montado para o Mercado Pago", async function (this: any, email: string) {
+    await montarPixRifa(this, email, null, true);
+});
+
+Then("o Pix montado deve ser de teste, de R$ 0,01", function (this: any) {
+    assert.equal(this.argsMP.body.transaction_amount, 0.01);
+    assert.equal(this.argsMP.body.metadata.teste, true);
+    assert.equal(this.argsMP.body.metadata.tipo, "RIFA");
+    assert.equal(this.argsMP.body.description, "Número da Rifa Solidária — Gatil Irmã Francisca");
+});
+
+Then("o Pix montado não deve ser de teste", function (this: any) {
+    assert.equal(this.argsMP.body.transaction_amount, 100);
+    assert.equal("teste" in this.argsMP.body.metadata, false);
+});
+
+Then("o Mercado Pago deve ter recebido o pedido de Pix da rifa de teste", function () {
+    const pedidos = getPedidosPixRifa();
+    assert.equal(pedidos.length, 1);
+    assert.equal(pedidos[0]!.teste, true);
+});
+
+Then("o Mercado Pago deve ter recebido o pedido de Pix da rifa normal", function () {
+    const pedidos = getPedidosPixRifa();
+    assert.equal(pedidos.length, 1);
+    assert.equal(pedidos[0]!.teste ?? false, false);
+});
+
+Then("o Pix criado deve ter o valor {string}", function (this: any, valor: string) {
+    assert.equal(String(this.lastResponse.body.data.valor), valor);
+});
+
+Given("que existe um Pix da rifa de teste {string} aprovado na API do Mercado Pago", function (paymentId: string) {
+    pixRifaFake(paymentId, {
+        status: "approved",
+        status_detail: "accredited",
+        transaction_amount: 0.01,
+        date_approved: new Date().toISOString(),
+        transaction_details: { net_received_amount: 0.01 },
+        metadata: { tipo: "RIFA", rastreio_id: RASTREIO_TESTE, utm_campaign: "RIFA_SOLIDARIA", teste: true },
+    });
+});

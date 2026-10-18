@@ -1,6 +1,6 @@
 import {type NextFunction, type Request, type Response} from "express";
 import { criarPreferenciaRifa } from "../mercadoPago/criarPreferenciaRifa.js";
-import { confirmarNumeroRifa, consultarStatusPixRifa, criarPixRifa, getAllRifasService, haNumerosDisponiveis, reconciliarPendentesRifa } from "../services/rifa.service.js";
+import { confirmarNumeroRifa, consultarStatusPixRifa, criarPixRifa, executarTarefasNoUso, getAllRifasService, haNumerosDisponiveis, tarefasDaRifa } from "../services/rifa.service.js";
 import Rifa from "../models/Rifa.js";
 import type { AuthenticatedRequest } from "../middlewares/token.middleware.js";
 import { enviarEmailConfirmacao } from "../services/email.service.js";
@@ -23,6 +23,8 @@ export const getPreferencia = async(req: Request<UtmMetadata, any, any>, res: Re
         const { utmSource, utmMedium, utmCampaign } = origemNormalizada;
 
         validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
+
+        await executarTarefasNoUso();
 
         if (!(await haNumerosDisponiveis())) {
             return res.status(409).json({ message: "Não há mais números disponíveis nesta rifa." });
@@ -49,7 +51,7 @@ export const criarPix = async(req: Request<any, any, { email: string } & UtmMeta
             utmCampaign: utmCampaign ?? null,
         };
 
-        const resposta = await criarPixRifa({ email, origem });
+        const resposta = await criarPixRifa({ email, origem, chaveTeste: req.header("x-pix-teste") });
         return res.status(resposta.status).json({ message: resposta.message, data: resposta.data });
 
     } catch (error) {
@@ -111,6 +113,7 @@ export const reenviarEmail = async(req: Request, res: Response, next: NextFuncti
             name: pagamento.name ?? "participante",
             email: pagamento.email,
             claimedNumber: pagamento.claimedNumber,
+            teste: pagamento.teste,
         });
 
         if (!enviado) {
@@ -125,14 +128,15 @@ export const reenviarEmail = async(req: Request, res: Response, next: NextFuncti
     }
 }
 /** Por chamada do agendador: o resto vai na próxima (os mais antigos primeiro). */
-const LIMITE_RECONCILIACAO = 30;
+const LIMITE_TAREFAS_DIARIAS = 50;
 
 /**
- * Chamado pelo Cron da Vercel (vercel.json), que manda
- * "Authorization: Bearer <CRON_SECRET>". Sem CRON_SECRET configurado, a
- * rota fica fechada.
+ * Chamado 1×/dia pelo Cron da Vercel (vercel.json), que manda
+ * "Authorization: Bearer <CRON_SECRET>": confere os Pix pendentes vencidos,
+ * envia os lembretes de escolha do número e sorteia quando o prazo vence.
+ * Sem CRON_SECRET configurado, a rota fica fechada.
  */
-export const reconciliarPendentes = async(req: Request, res: Response, next: NextFunction) => {
+export const tarefasDiarias = async(req: Request, res: Response, next: NextFunction) => {
 
     try {
 
@@ -141,11 +145,22 @@ export const reconciliarPendentes = async(req: Request, res: Response, next: Nex
             return res.status(401).json({ message: "Não autorizado." });
         }
 
-        const conferidos = await reconciliarPendentesRifa({ aplicar: true, limite: LIMITE_RECONCILIACAO });
-        const aplicados = conferidos.filter((c) => c.aplicado);
+        const { pendentes, escolhas } = await tarefasDaRifa({ limite: LIMITE_TAREFAS_DIARIAS });
+        const atualizados = pendentes.filter((c) => c.aplicado);
 
-        console.info("[reconciliar rifa]", conferidos.length, "pendente(s) conferido(s),", aplicados.length, "atualizado(s)");
-        res.json({ message: "Pendentes conferidos.", data: { conferidos: conferidos.length, atualizados: aplicados } });
+        console.info(
+            "[tarefas rifa]", pendentes.length, "pendente(s) conferido(s),", atualizados.length, "atualizado(s),",
+            escolhas.lembretes.length, "lembrete(s),", escolhas.sorteados.length, "sorteio(s)"
+        );
+        res.json({
+            message: "Tarefas da rifa concluídas.",
+            data: {
+                conferidos: pendentes.length,
+                atualizados,
+                lembretes: escolhas.lembretes,
+                sorteados: escolhas.sorteados,
+            },
+        });
 
     } catch (error) {
         next(error);

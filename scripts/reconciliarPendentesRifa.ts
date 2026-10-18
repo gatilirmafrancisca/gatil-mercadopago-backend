@@ -2,9 +2,10 @@
 //
 // Confere no Mercado Pago cada pagamento da rifa que está PENDENTE no banco:
 // pago vira APROVADO (e o script imprime o link para a pessoa escolher o
-// número), Pix vencido ou recusado vira CANCELADO e deixa de ocupar vaga.
-// O Cron da Vercel faz o mesmo uma vez por dia; este script é para rodar na
-// hora, ou para conferir antes de aplicar.
+// número; os lembretes por e-mail seguem pelas tarefas da rifa), Pix vencido
+// ou recusado vira CANCELADO e deixa de ocupar vaga. O site e o Cron da
+// Vercel (/api/rifa/tarefas-diarias) fazem o mesmo; este script é para rodar
+// na hora, ou para conferir antes de aplicar.
 //
 // Uso:
 //   npm run reconciliar:rifa             # só lista
@@ -30,13 +31,13 @@ async function main() {
     const conferidos = await reconciliarPendentesRifa({ aplicar });
     console.log(`${conferidos.length} pagamento(s) PENDENTE(S) no banco.\n`);
 
-    for (const { paymentId, status, email, aplicado } of conferidos) {
+    for (const { paymentId, status, email, teste, aplicado } of conferidos) {
         const acao = status === "PENDENTE" ? "segue pendente no Mercado Pago"
             : status === "ERRO" ? "não foi possível consultar o Mercado Pago"
             : aplicar ? (aplicado ? `atualizado para ${status}` : `não alterado (já não estava PENDENTE)`)
             : `vai virar ${status}`;
 
-        console.log(`- ${paymentId} · ${email ?? "sem e-mail"} · ${acao}`);
+        console.log(`- ${paymentId}${teste ? " (teste)" : ""} · ${email ?? "sem e-mail"} · ${acao}`);
         if (status === "APROVADO") {
             console.log(`  link para escolher o número: ${frontendUrl}/rifa/pagamento-aprovado?payment_id=${paymentId}`);
         }

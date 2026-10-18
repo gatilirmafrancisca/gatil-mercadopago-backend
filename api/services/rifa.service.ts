@@ -1,5 +1,5 @@
 import Rifa, { type IRifa } from "../models/Rifa.js";
-import { ConflictError, NotFoundError } from "../utils/errors.js";
+import { ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import {
     normalizarDadosCriacaoRifa,
     validarCriacaoRifa,
@@ -21,15 +21,19 @@ import {
     validarParametros,
 } from "./doacao.service.js";
 import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
-import { sincronizarFinanceiroDoPagamento } from "./mercadoPago.service.js";
+import { dadosRifaDoPagamento, sincronizarFinanceiroDoPagamento } from "./mercadoPago.service.js";
+import { processarEscolhasPendentes, type ResultadoEscolhas } from "./lembretes.service.js";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { Types } from "mongoose";
 
 type Pagamento = Awaited<ReturnType<typeof buscarPagamento>>;
 
 
-/** Ainda há números livres? Pagamentos cancelados não ocupam vaga. */
+/** Ainda há números livres? Pagamentos cancelados e Pix de teste não ocupam vaga. */
 export const haNumerosDisponiveis = async (): Promise<boolean> => {
     const vagasOcupadas = await Rifa.countDocuments({
         status: { $ne: "CANCELADO" satisfies RifaTypes.StatusRifaType },
+        teste: { $ne: true },
     });
     return vagasOcupadas < RifaTypes.TOTAL_NUMEROS;
 };
@@ -85,17 +89,28 @@ export const sincronizarPagamentoRifa = async (
     // seja gravado — senão o pagamento ficava PENDENTE pra sempre.
     const { email, ...semEmail } = dadosRecebidos;
     const dadosBase: Partial<Omit<IRifa, "paymentId">> = ehEmailValido(email) ? dadosRecebidos : semEmail;
+    const aprovado = dadosBase.status === "APROVADO";
 
     try {
-        await registrarPagamentoRifa(paymentId, dadosBase);
+        // aprovadoEm abre o prazo de escolha do número (lembretes.service.ts).
+        await registrarPagamentoRifa(paymentId, { ...dadosBase, ...(aprovado ? { aprovadoEm: new Date() } : {}) });
     } catch (error) {
         if (!(error instanceof ConflictError)) throw error;
 
         await Rifa.updateOne(
             { paymentId },
-            { $set: { status: dadosBase.status } },
+            {
+                $set: {
+                    status: dadosBase.status,
+                    ...(dadosBase.teste !== undefined ? { teste: dadosBase.teste } : {}),
+                },
+            },
             { runValidators: true }
         );
+
+        if (aprovado) {
+            await Rifa.updateOne({ paymentId, aprovadoEm: null }, { $set: { aprovadoEm: new Date() } });
+        }
 
         // Só preenche o e-mail do MP se o participante ainda não informou um.
         if (dadosBase.email) {
@@ -140,6 +155,7 @@ export const confirmarNumeroRifa =async (paymentId: string, data: Record<string,
                 name: rifaAtualizada.name ?? "participante",
                 email: rifaAtualizada.email,
                 claimedNumber: rifaAtualizada.claimedNumber!,
+                teste: rifaAtualizada.teste,
             });
         }
 
@@ -163,7 +179,10 @@ export const getAllRifasService = async (): Promise<ResponseType> => {
 
     try {
 
-        const rifas = await Rifa.find({ claimedNumber: { $ne: null } }).distinct("claimedNumber");
+        await executarTarefasNoUso();
+
+        // Números de Pix de teste não ocupam a grade real.
+        const rifas = await Rifa.find({ claimedNumber: { $ne: null }, teste: { $ne: true } }).distinct("claimedNumber");
         return { status: 200, message: "Rifas encontradas.", data: rifas };
 
     } catch (error: any) {
@@ -178,16 +197,34 @@ export const getAllRifasService = async (): Promise<ResponseType> => {
 interface CriarPixRifaArgs {
     email: unknown;
     origem?: UtmMetadata;
+    /** Header x-pix-teste: ausente = Pix normal; igual a PIX_TESTE_CHAVE = Pix de R$ 0,01. */
+    chaveTeste?: unknown;
 }
+
+/** Compara com PIX_TESTE_CHAVE em tempo constante. Sem a variável, o modo teste fica desligado. */
+const chavePixTesteValida = (chave: unknown): boolean => {
+    const esperada = process.env.PIX_TESTE_CHAVE;
+    if (!esperada || typeof chave !== "string" || !chave) return false;
+    // Hash dos dois lados: timingSafeEqual exige o mesmo tamanho.
+    const a = createHash("sha256").update(chave).digest();
+    const b = createHash("sha256").update(esperada).digest();
+    return timingSafeEqual(a, b);
+};
 
 /**
  * Cria o Pix de um número da rifa. O valor é o do bilhete, definido no
  * servidor. Aprovado, o front leva pra /rifa/pagamento-aprovado, e o
  * verificar-pagamento segue exatamente como no pagamento por cartão.
  */
-export const criarPixRifa = async ({ email, origem = {} }: CriarPixRifaArgs): Promise<ResponseType> => {
+export const criarPixRifa = async ({ email, origem = {}, chaveTeste }: CriarPixRifaArgs): Promise<ResponseType> => {
 
     try {
+
+        // Chave errada nunca vira um Pix de R$ 100 por engano: é recusada.
+        const teste = chaveTeste !== undefined;
+        if (teste && !chavePixTesteValida(chaveTeste)) {
+            throw new ForbiddenError("Chave de teste inválida.");
+        }
 
         const emailNormalizado = validarEmailPix(email);
 
@@ -195,13 +232,17 @@ export const criarPixRifa = async ({ email, origem = {} }: CriarPixRifaArgs): Pr
         const { utmSource, utmMedium, utmCampaign } = origemNormalizada;
         validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
 
-        if (!(await haNumerosDisponiveis())) {
+        await executarTarefasNoUso();
+
+        // O Pix de teste não ocupa vaga, então não depende do estoque.
+        if (!teste && !(await haNumerosDisponiveis())) {
             throw new ConflictError("Não há mais números disponíveis nesta rifa.");
         }
 
         const pagamento = await mercadoPagoPixRifaClient.criar({
             email: emailNormalizado,
             origem: origemNormalizada,
+            teste,
         });
 
         const qrCode = pagamento?.point_of_interaction?.transaction_data?.qr_code;
@@ -217,6 +258,8 @@ export const criarPixRifa = async ({ email, origem = {} }: CriarPixRifaArgs): Pr
             data: {
                 paymentId: pagamento.id,
                 rastreioId: pagamento.external_reference,
+                valor: teste ? RifaTypes.VALOR_PIX_TESTE_BRL : RifaTypes.TICKET_PRICE_BRL,
+                teste,
                 qrCode,
                 qrCodeBase64,
                 expiraEm: pagamento.date_of_expiration
@@ -282,11 +325,7 @@ export const aplicarStatusDoMercadoPago = async (
         const registro = await Rifa.findOne({ paymentId }, { status: 1 }).lean();
         if (registro?.status === "APROVADO") return null;
 
-        await sincronizarPagamentoRifa(paymentId, {
-            status,
-            amount: RifaTypes.TICKET_PRICE_BRL,
-            ...(pagamento.payer?.email ? { email: pagamento.payer.email } : {}),
-        });
+        await sincronizarPagamentoRifa(paymentId, dadosRifaDoPagamento(pagamento, status));
     } else if (status === "CANCELADO") {
         const { modifiedCount } = await Rifa.updateOne(
             { paymentId, status: "PENDENTE" satisfies RifaTypes.StatusRifaType },
@@ -309,6 +348,7 @@ export interface PendenteConferido {
     /** Status atual no MP, já no vocabulário do banco (Pix vencido = CANCELADO). */
     status: RifaTypes.StatusRifaType | "ERRO";
     email: string | null;
+    teste: boolean;
     aplicado: boolean;
 }
 
@@ -318,29 +358,79 @@ export interface PendenteConferido {
  * vira CANCELADO e deixa de ocupar vaga. Sem `aplicar`, só lista.
  */
 export const reconciliarPendentesRifa = async (
-    { aplicar, limite }: { aplicar: boolean; limite?: number }
+    { aplicar, limite, criadosAntesDe }: { aplicar: boolean; limite?: number; criadosAntesDe?: Date }
 ): Promise<PendenteConferido[]> => {
 
+    // O schema não tem createdAt, mas o _id guarda a data de criação.
+    const filtro: Record<string, unknown> = { status: "PENDENTE" satisfies RifaTypes.StatusRifaType };
+    if (criadosAntesDe) {
+        filtro._id = { $lt: Types.ObjectId.createFromTime(Math.floor(criadosAntesDe.getTime() / 1000)) };
+    }
+
     // _id crescente = mais antigos primeiro (já vencidos, se não pagos).
-    let consulta = Rifa.find({ status: "PENDENTE" satisfies RifaTypes.StatusRifaType }, { paymentId: 1, email: 1 })
-        .sort({ _id: 1 });
+    let consulta = Rifa.find(filtro, { paymentId: 1, email: 1, teste: 1 }).sort({ _id: 1 });
     if (limite) consulta = consulta.limit(limite);
     const pendentes = await consulta.lean();
 
-    const conferidos: PendenteConferido[] = [];
-
-    for (const { paymentId, email } of pendentes) {
+    return Promise.all(pendentes.map(async ({ paymentId, email, teste }): Promise<PendenteConferido> => {
         try {
             const pagamento = await buscarPagamento(paymentId);
             const status = statusRifaDoPagamento(pagamento);
             const aplicado = aplicar && (await aplicarStatusDoMercadoPago(pagamento)) !== null;
 
-            conferidos.push({ paymentId, status, email: email ?? pagamento.payer?.email ?? null, aplicado });
+            return { paymentId, status, email: email ?? pagamento.payer?.email ?? null, teste: teste ?? false, aplicado };
         } catch (err) {
             console.error("[reconciliar rifa] falha ao conferir", paymentId, err);
-            conferidos.push({ paymentId, status: "ERRO", email: email ?? null, aplicado: false });
+            return { paymentId, status: "ERRO", email: email ?? null, teste: teste ?? false, aplicado: false };
         }
-    }
+    }));
+};
 
-    return conferidos;
+// ---------- Tarefas da rifa: no uso do site e no Cron diário ----------
+
+/** PENDENTE mais velho que isso já passou da validade do Pix (com folga). */
+const IDADE_PENDENTE_VENCIDO_MS = (PIX_EXPIRACAO_MINUTOS + 5) * 60_000;
+
+/** Pix pago vira APROVADO (e entra nos lembretes); vencido vira CANCELADO. */
+export const conferirPendentesVencidos = (limite: number) =>
+    reconciliarPendentesRifa({
+        aplicar: true,
+        limite,
+        criadosAntesDe: new Date(Date.now() - IDADE_PENDENTE_VENCIDO_MS),
+    });
+
+export interface ResultadoTarefas {
+    pendentes: PendenteConferido[];
+    escolhas: ResultadoEscolhas;
+}
+
+/** Confere os pendentes vencidos e cuida de quem pagou e não escolheu o número. */
+export const tarefasDaRifa = async ({ limite }: { limite: number }): Promise<ResultadoTarefas> => {
+    const pendentes = await conferirPendentesVencidos(limite).catch((err) => {
+        console.error("[tarefas rifa] falha ao conferir pendentes", err);
+        return [] as PendenteConferido[];
+    });
+    const escolhas = await processarEscolhasPendentes({ limite });
+    return { pendentes, escolhas };
+};
+
+const INTERVALO_TAREFAS_NO_USO_MS = 5 * 60_000;
+const LIMITE_TAREFAS_NO_USO = 5;
+
+// Objeto mutável de propósito — os testes zeram a última execução.
+export const tarefasRifa = { ultimaExecucao: 0 };
+
+/**
+ * Roda as tarefas da rifa durante o uso normal do site (gerar pagamento,
+ * abrir a grade): no máximo a cada 5 minutos por instância e com poucos
+ * registros por vez, pra não atrasar a requisição. Com await: em
+ * serverless, um "dispara e esquece" pode ser cortado. Nunca lança erro.
+ */
+export const executarTarefasNoUso = async (): Promise<void> => {
+    if (Date.now() - tarefasRifa.ultimaExecucao < INTERVALO_TAREFAS_NO_USO_MS) return;
+    tarefasRifa.ultimaExecucao = Date.now();
+
+    await tarefasDaRifa({ limite: LIMITE_TAREFAS_NO_USO }).catch((err) =>
+        console.error("[tarefas rifa] falha", err)
+    );
 };

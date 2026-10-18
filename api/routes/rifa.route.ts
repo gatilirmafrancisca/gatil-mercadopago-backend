@@ -11,6 +11,6 @@ router.get("/status-pix/:paymentId", criarLimiteStatusPix(), rifaController.stat
 router.post("/confirmar-numero", requirePaymentToken, rifaController.confirmarNumero);
 router.get("/numeros-ocupados", rifaController.getAllRifas);
 router.post("/reenviar-email", requirePaymentToken, rifaController.reenviarEmail);
-router.get("/reconciliar-pendentes", rifaController.reconciliarPendentes);
+router.get("/tarefas-diarias", rifaController.tarefasDiarias);
 
 export default router;
