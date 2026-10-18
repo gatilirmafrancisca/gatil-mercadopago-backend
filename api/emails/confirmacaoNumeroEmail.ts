@@ -14,6 +14,8 @@ import {
 interface ConfirmacaoNumeroEmailProps {
     name: string;
     claimedNumber: number;
+    /** O prazo de escolha venceu e o número foi sorteado (lembretes.service.ts). */
+    sorteado?: boolean;
 }
 
 const cores = {
@@ -28,7 +30,7 @@ const cores = {
 // Mesmo template de antes, só que sem sintaxe JSX — h(Tag, props, ...filhos)
 // no lugar de <Tag>filhos</Tag>. Isso deixa o arquivo como .ts puro, sem
 // precisar de .tsx, que é onde o build da Vercel estava travando.
-export function ConfirmacaoNumeroEmail({ name, claimedNumber }: ConfirmacaoNumeroEmailProps) {
+export function ConfirmacaoNumeroEmail({ name, claimedNumber, sorteado = false }: ConfirmacaoNumeroEmailProps) {
     const numeroFormatado = String(claimedNumber).padStart(3, "0");
 
     return h(
@@ -91,6 +93,20 @@ export function ConfirmacaoNumeroEmail({ name, claimedNumber }: ConfirmacaoNumer
                     },
                     "Sua participação na Rifa Solidária está confirmada."
                 ),
+                sorteado
+                    ? h(
+                        Text,
+                        {
+                            style: {
+                                textAlign: "center",
+                                color: cores.carvao,
+                                fontSize: "13px",
+                                lineHeight: "20px",
+                            },
+                        },
+                        "Como nenhum número foi escolhido no prazo, sorteamos um número livre para você."
+                    )
+                    : null,
                 h(
                     Section,
                     { style: { textAlign: "center", margin: "24px 0" } },

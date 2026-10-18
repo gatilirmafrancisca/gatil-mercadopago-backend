@@ -4,6 +4,8 @@ import mongoose from "mongoose";
 import Rifa from "../../api/models/Rifa.js";
 import { resetarFakesMercadoPago } from "../support/mercadoPagoFake.js";
 import { PAINEL_URL_TESTE, resetarPainelFake } from "../support/painelFake.js";
+import { resetarEmailFake } from "../support/emailFake.js";
+import { tarefasRifa } from "../../api/services/rifa.service.js";
 
 BeforeAll(function () {
     // Só define se ainda não existir — em CI, o workflow já define
@@ -17,11 +19,19 @@ BeforeAll(function () {
     // Sempre o fake: os testes nunca falam com o painel de verdade.
     process.env.PAINEL_ADM_URL = PAINEL_URL_TESTE;
     process.env.PAINEL_ADM_INTERNAL_SECRET ??= "segredo-painel-teste";
+    process.env.FRONTEND_URL ??= "https://rifa.teste";
 });
 
 let mongod: MongoMemoryServer;
+let cenarios = 0;
 
-Before(async function () {
+Before(async function (this: any) {
+    // O rate limit de criar-pix é por IP e vale pro processo inteiro: cada
+    // cenário usa o seu (trust proxy lê o X-Forwarded-For), como pessoas
+    // diferentes, pra um cenário não consumir o limite do outro.
+    cenarios++;
+    this.ipCenario = `10.0.${Math.floor(cenarios / 256)}.${cenarios % 256}`;
+
     mongod = await MongoMemoryServer.create();
     await mongoose.connect(mongod.getUri());
 
@@ -34,6 +44,12 @@ Before(async function () {
 
     resetarFakesMercadoPago();
     resetarPainelFake();
+    resetarEmailFake();
+
+    // Cada cenário começa sem a trava de "no máximo a cada 5 minutos" das
+    // tarefas da rifa, e sem o modo de Pix de teste ligado.
+    tarefasRifa.ultimaExecucao = 0;
+    delete process.env.PIX_TESTE_CHAVE;
 });
 
 After(async function () {

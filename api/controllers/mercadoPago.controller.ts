@@ -1,6 +1,6 @@
 import { type Request, type Response } from "express";
 import { verificarAssinaturaMP } from "../mercadoPago/verificarAssinatura.js";
-import { processarNotificacaoPagamento, mapearStatusMP, sincronizarFinanceiroDoPagamento, ehPagamentoRifa } from "../services/mercadoPago.service.js";
+import { processarNotificacaoPagamento, sincronizarFinanceiroDoPagamento, ehPagamentoRifa, dadosRifaDoPagamento } from "../services/mercadoPago.service.js";
 import { sincronizarPagamentoRifa } from "../services/rifa.service.js";
 import Rifa, { type IRifa } from "../models/Rifa.js";
 import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
@@ -55,13 +55,7 @@ export const VerificarPagamentoController = async (req: Request, res: Response) 
                 return res.status(402).json({ message: "Pagamento não aprovado." });
             }
 
-            const dadosCriacao: Partial<Omit<IRifa, "paymentId">> = {
-                status: mapearStatusMP(dadoReal.status!),
-                amount: RifaTypes.TICKET_PRICE_BRL,
-                ...(dadoReal.payer?.email ? { email: dadoReal.payer.email } : {}),
-            };
-
-            await sincronizarPagamentoRifa(paymentId, dadosCriacao);
+            await sincronizarPagamentoRifa(paymentId, dadosRifaDoPagamento(dadoReal));
 
             // O webhook que atualizaria o painel atrasou/falhou: atualiza por
             // aqui também. Se o painel estiver fora, a pessoa segue o fluxo.

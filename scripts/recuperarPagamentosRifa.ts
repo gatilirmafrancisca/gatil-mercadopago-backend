@@ -18,8 +18,9 @@ import Rifa from "../api/models/Rifa.js";
 import * as RifaTypes from "../api/types/rifa.types.js";
 import { sincronizarPagamentoRifa } from "../api/services/rifa.service.js";
 import {
+    dadosRifaDoPagamento,
     ehPagamentoRifa,
-    mapearStatusMP,
+    ehPagamentoTeste,
     sincronizarFinanceiroDoPagamento,
 } from "../api/services/mercadoPago.service.js";
 
@@ -93,7 +94,7 @@ async function main() {
 
         faltando++;
         console.log(
-            `\n- ${pagamento.id} · ${pagamento.payment_method_id} · ${pagamento.date_approved}` +
+            `\n- ${pagamento.id}${ehPagamentoTeste(pagamento) ? " (teste)" : ""} · ${pagamento.payment_method_id} · ${pagamento.date_approved}` +
             ` · ${pagamento.payer?.email ?? "sem e-mail"}` +
             `${registro ? ` · no banco como ${registro.status}` : " · fora do banco"}`
         );
@@ -101,11 +102,7 @@ async function main() {
 
         if (!aplicar) continue;
 
-        await sincronizarPagamentoRifa(String(pagamento.id), {
-            status: mapearStatusMP(pagamento.status),
-            amount: RifaTypes.TICKET_PRICE_BRL,
-            ...(pagamento.payer?.email ? { email: pagamento.payer.email } : {}),
-        });
+        await sincronizarPagamentoRifa(String(pagamento.id), dadosRifaDoPagamento(pagamento));
 
         await sincronizarFinanceiroDoPagamento(pagamento).catch((err) =>
             console.error("  falha ao sincronizar o painel:", err)

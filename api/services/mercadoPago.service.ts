@@ -50,6 +50,28 @@ export const ehPagamentoRifa = (pagamento: Pagamento): boolean =>
     || pagamento.metadata?.utm_campaign === CAMPANHA_RIFA
     || pagamento.description === RifaTypes.DESCRICAO_RIFA;
 
+/** Pix de teste de R$ 0,01 (ver criarPixRifa.ts). */
+export const ehPagamentoTeste = (pagamento: Pagamento): boolean =>
+    pagamento.metadata?.teste === true || pagamento.metadata?.teste === "true";
+
+/**
+ * O que o banco da rifa guarda de um pagamento do MP. O valor é o do
+ * bilhete — no Pix de teste, o valor cobrado (R$ 0,01).
+ */
+export const dadosRifaDoPagamento = (
+    pagamento: Pagamento,
+    status: RifaTypes.StatusRifaType = mapearStatusMP(pagamento.status ?? "pending"),
+): Partial<Omit<IRifa, "paymentId">> => {
+    const teste = ehPagamentoTeste(pagamento);
+    return {
+        status,
+        amount: teste ? (pagamento.transaction_amount ?? 0) : RifaTypes.TICKET_PRICE_BRL,
+        // Só true é gravado: ver o índice único em models/Rifa.ts.
+        ...(teste ? { teste: true } : {}),
+        ...(pagamento.payer?.email ? { email: pagamento.payer.email } : {}),
+    };
+};
+
 export const processarNotificacaoPagamento = async (body: any): Promise<void> => {
     const { type, data } = body ?? {};
     if (type !== "payment" || !data?.id) return;
@@ -62,14 +84,7 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
 
         // CENÁRIO DA RIFA SOLIDÁRIA
         if (ehPagamentoRifa(pagamento)) {
-
-            const dadosCriacao: Partial<Omit<IRifa, "paymentId">> = {
-                status: mapearStatusMP(pagamento.status!),
-                amount: RifaTypes.TICKET_PRICE_BRL,
-                ...(pagamento.payer?.email ? { email: pagamento.payer.email } : {}),
-            };
-
-            await sincronizarPagamentoRifa(String(pagamento.id), dadosCriacao);
+            await sincronizarPagamentoRifa(String(pagamento.id), dadosRifaDoPagamento(pagamento));
         }
 
         // CENÁRIO DA DOAÇÃO — conversão para Meta/GA4. Falha aqui não pode
@@ -93,8 +108,12 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
     }
 };
 
-/** Envia ao painel o estado atual de um pagamento buscado na API do MP. */
-export async function sincronizarFinanceiroDoPagamento(pagamento: Pagamento) {
+/**
+ * Envia ao painel o estado atual de um pagamento buscado na API do MP.
+ * `status` sobrescreve o do MP — ex: Pix vencido que o MP ainda mostra como
+ * pendente, mas que o banco já considera CANCELADO.
+ */
+export async function sincronizarFinanceiroDoPagamento(pagamento: Pagamento, status?: RifaTypes.StatusRifaType) {
     await sincronizarFinanceiro({
 
         mercadoPagoId: String(pagamento.id),
@@ -102,7 +121,7 @@ export async function sincronizarFinanceiroDoPagamento(pagamento: Pagamento) {
         // (ex: Pix aguardando) o MP ainda não informa o líquido, e o painel
         // exige um valor: vai o bruto, e a aprovação sobrescreve.
         valor: pagamento.transaction_details?.net_received_amount || pagamento.transaction_amount,
-        status: mapearStatusMP(pagamento.status ?? "pending"),
+        status: status ?? mapearStatusMP(pagamento.status ?? "pending"),
         utmSource: pagamento.metadata?.utm_source ?? "",
         utmMedium: pagamento.metadata?.utm_medium ?? "",
         // O painel separa a rifa das doações (categoria=DOACAO) por esse campo.
@@ -115,7 +134,7 @@ export async function sincronizarFinanceiroDoPagamento(pagamento: Pagamento) {
             ? { emailDoador: pagamento.payer.email }
         : {}),
         ...(pagamento.description
-        ? { descricao: pagamento.description }
+        ? { descricao: `${ehPagamentoTeste(pagamento) ? "[TESTE] " : ""}${pagamento.description}` }
         : {}),
     });
 }
