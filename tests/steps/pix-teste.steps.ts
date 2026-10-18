@@ -25,3 +25,17 @@ Then("a descrição enviada ao painel para {string} deve começar com {string}",
     const envio = getEnviosPainel().filter((e) => e.mercadoPagoId === paymentId).at(-1);
     assert.ok(envio?.descricao?.startsWith(prefixo), `descrição: ${envio?.descricao}`);
 });
+
+Given(
+    "que existe um registro antigo {string} com o número {int}, sem o campo teste",
+    async function (paymentId: string, numero: number) {
+        // Direto na coleção: o documento fica exatamente como os de antes do campo.
+        await Rifa.collection.insertOne({ paymentId, status: "APROVADO", amount: 100, claimedNumber: numero });
+    }
+);
+
+Then("o pagamento {string} não deve ter o campo teste gravado", async function (paymentId: string) {
+    const doc = await Rifa.collection.findOne({ paymentId });
+    assert.ok(doc, `sem documento ${paymentId}`);
+    assert.equal("teste" in doc, false, JSON.stringify(doc));
+});

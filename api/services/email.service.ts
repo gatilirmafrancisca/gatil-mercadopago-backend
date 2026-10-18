@@ -60,7 +60,7 @@ interface EnviarEmailConfirmacaoArgs {
     /** Número sorteado porque o prazo de escolha venceu. */
     sorteado?: boolean;
     /** Pix de teste de R$ 0,01. */
-    teste?: boolean;
+    teste?: boolean | undefined;
 }
 
 /**
@@ -88,7 +88,7 @@ interface EnviarEmailEscolhaNumeroArgs {
     paymentId: string;
     diasRestantes: number;
     prazo: Date;
-    teste?: boolean;
+    teste?: boolean | undefined;
 }
 
 /** Lembrete de que o pagamento foi aprovado e o número ainda não foi escolhido. */

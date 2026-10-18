@@ -102,7 +102,7 @@ export const sincronizarPagamentoRifa = async (
             {
                 $set: {
                     status: dadosBase.status,
-                    ...(dadosBase.teste !== undefined ? { teste: dadosBase.teste } : {}),
+                    ...(dadosBase.teste ? { teste: true } : {}),
                 },
             },
             { runValidators: true }

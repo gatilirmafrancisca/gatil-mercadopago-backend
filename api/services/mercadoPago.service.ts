@@ -66,7 +66,8 @@ export const dadosRifaDoPagamento = (
     return {
         status,
         amount: teste ? (pagamento.transaction_amount ?? 0) : RifaTypes.TICKET_PRICE_BRL,
-        teste,
+        // Só true é gravado: ver o índice único em models/Rifa.ts.
+        ...(teste ? { teste: true } : {}),
         ...(pagamento.payer?.email ? { email: pagamento.payer.email } : {}),
     };
 };

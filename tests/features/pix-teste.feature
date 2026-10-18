@@ -55,3 +55,15 @@ Funcionalidade: Pix de teste de R$ 0,01 em produção
     Então a grade de números não deve ter o número 7
     Quando eu escolho o número 7 com esse token
     Então o pagamento "660004" deve ter o número 7
+
+  Cenário: Registro antigo, sem o campo teste, continua bloqueando o número para um registro novo
+    Dado que existe um registro antigo "650001" com o número 9, sem o campo teste
+    E que tenho um token válido para o pagamento "650002"
+    Quando eu envio "POST /api/rifa/confirmar-numero" de novo com o mesmo token, para o número 9
+    Então a resposta HTTP deve ser 409
+
+  Cenário: Pagamento real registrado pelo webhook não grava o campo teste
+    Dado que existe um pagamento aprovado "650003" na API do Mercado Pago
+    Quando o backend recebe uma notificação de webhook para "650003" com assinatura válida
+    Então deve existir um documento com paymentId "650003" e status "APROVADO"
+    E o pagamento "650003" não deve ter o campo teste gravado
