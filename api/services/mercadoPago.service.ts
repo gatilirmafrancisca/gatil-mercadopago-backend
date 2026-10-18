@@ -93,8 +93,12 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
     }
 };
 
-/** Envia ao painel o estado atual de um pagamento buscado na API do MP. */
-export async function sincronizarFinanceiroDoPagamento(pagamento: Pagamento) {
+/**
+ * Envia ao painel o estado atual de um pagamento buscado na API do MP.
+ * `status` sobrescreve o do MP — ex: Pix vencido que o MP ainda mostra como
+ * pendente, mas que o banco já considera CANCELADO.
+ */
+export async function sincronizarFinanceiroDoPagamento(pagamento: Pagamento, status?: RifaTypes.StatusRifaType) {
     await sincronizarFinanceiro({
 
         mercadoPagoId: String(pagamento.id),
@@ -102,7 +106,7 @@ export async function sincronizarFinanceiroDoPagamento(pagamento: Pagamento) {
         // (ex: Pix aguardando) o MP ainda não informa o líquido, e o painel
         // exige um valor: vai o bruto, e a aprovação sobrescreve.
         valor: pagamento.transaction_details?.net_received_amount || pagamento.transaction_amount,
-        status: mapearStatusMP(pagamento.status ?? "pending"),
+        status: status ?? mapearStatusMP(pagamento.status ?? "pending"),
         utmSource: pagamento.metadata?.utm_source ?? "",
         utmMedium: pagamento.metadata?.utm_medium ?? "",
         // O painel separa a rifa das doações (categoria=DOACAO) por esse campo.

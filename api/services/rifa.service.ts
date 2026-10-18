@@ -5,6 +5,7 @@ import {
     validarCriacaoRifa,
     normalizarDadosConfirmacaoRifa,
     validarConfirmacaoRifa,
+    ehEmailValido,
 } from "../utils/rifavalidar.js";
 import type ResponseType from "../types/response.type.js";
 import { enviarEmailConfirmacao } from "./email.service.js";
@@ -19,6 +20,10 @@ import {
     validarEmailPix,
     validarParametros,
 } from "./doacao.service.js";
+import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
+import { sincronizarFinanceiroDoPagamento } from "./mercadoPago.service.js";
+
+type Pagamento = Awaited<ReturnType<typeof buscarPagamento>>;
 
 
 /** Ainda há números livres? Pagamentos cancelados não ocupam vaga. */
@@ -73,8 +78,14 @@ export const registrarPagamentoRifa = async (
  */
 export const sincronizarPagamentoRifa = async (
     paymentId: string,
-    dadosBase: Partial<Omit<IRifa, "paymentId">>
+    dadosRecebidos: Partial<Omit<IRifa, "paymentId">>
 ): Promise<void> => {
+    // O e-mail do MP é só um extra (a pessoa informa o dela ao escolher o
+    // número): fora do formato, fica de fora em vez de impedir que o status
+    // seja gravado — senão o pagamento ficava PENDENTE pra sempre.
+    const { email, ...semEmail } = dadosRecebidos;
+    const dadosBase: Partial<Omit<IRifa, "paymentId">> = ehEmailValido(email) ? dadosRecebidos : semEmail;
+
     try {
         await registrarPagamentoRifa(paymentId, dadosBase);
     } catch (error) {
@@ -228,10 +239,108 @@ export const criarPixRifa = async ({ email, origem = {} }: CriarPixRifaArgs): Pr
 export const consultarStatusPixRifa = async (paymentId: unknown, ref: unknown): Promise<ResponseType> => {
 
     const pagamento = await buscarPixDoSite(paymentId, ref, "RIFA");
+    const status = statusDoPix(pagamento);
+
+    // O webhook é quem registra; isso só cobre o caso de ele atrasar ou
+    // falhar enquanto a pessoa está com o Pix na tela. Falha aqui não pode
+    // impedir o front de seguir.
+    if (status !== "PENDENTE") {
+        await aplicarStatusDoMercadoPago(pagamento).catch((err) =>
+            console.error("[status-pix rifa] falha ao atualizar o banco", pagamento.id, err)
+        );
+    }
 
     return {
         status: 200,
         message: "Status do Pix.",
-        data: { status: statusDoPix(pagamento) },
+        data: { status },
     };
+};
+
+// ---------- Pendentes: banco x Mercado Pago ----------
+
+/** Status da rifa no banco para um pagamento do MP: Pix vencido é CANCELADO. */
+export const statusRifaDoPagamento = (pagamento: Pagamento): RifaTypes.StatusRifaType => {
+    const status = statusDoPix(pagamento);
+    return status === "EXPIRADO" ? "CANCELADO" : status;
+};
+
+/**
+ * Leva ao banco (e ao painel) o status atual de um pagamento da rifa.
+ * Aprovado: registra/atualiza. Cancelado ou vencido: só tira do PENDENTE —
+ * nunca rebaixa um pagamento já APROVADO (ex: um número já escolhido).
+ * Devolve o status aplicado, ou null se nada mudou.
+ */
+export const aplicarStatusDoMercadoPago = async (
+    pagamento: Pagamento
+): Promise<RifaTypes.StatusRifaType | null> => {
+
+    const paymentId = String(pagamento.id);
+    const status = statusRifaDoPagamento(pagamento);
+
+    if (status === "APROVADO") {
+        const registro = await Rifa.findOne({ paymentId }, { status: 1 }).lean();
+        if (registro?.status === "APROVADO") return null;
+
+        await sincronizarPagamentoRifa(paymentId, {
+            status,
+            amount: RifaTypes.TICKET_PRICE_BRL,
+            ...(pagamento.payer?.email ? { email: pagamento.payer.email } : {}),
+        });
+    } else if (status === "CANCELADO") {
+        const { modifiedCount } = await Rifa.updateOne(
+            { paymentId, status: "PENDENTE" satisfies RifaTypes.StatusRifaType },
+            { $set: { status } }
+        );
+        if (modifiedCount === 0) return null;
+    } else {
+        return null;
+    }
+
+    await sincronizarFinanceiroDoPagamento(pagamento, status).catch((err) =>
+        console.error("[rifa] falha ao sincronizar painel", paymentId, err)
+    );
+
+    return status;
+};
+
+export interface PendenteConferido {
+    paymentId: string;
+    /** Status atual no MP, já no vocabulário do banco (Pix vencido = CANCELADO). */
+    status: RifaTypes.StatusRifaType | "ERRO";
+    email: string | null;
+    aplicado: boolean;
+}
+
+/**
+ * Confere no Mercado Pago cada registro PENDENTE da rifa: pago vira
+ * APROVADO (a pessoa ainda pode escolher o número), vencido ou recusado
+ * vira CANCELADO e deixa de ocupar vaga. Sem `aplicar`, só lista.
+ */
+export const reconciliarPendentesRifa = async (
+    { aplicar, limite }: { aplicar: boolean; limite?: number }
+): Promise<PendenteConferido[]> => {
+
+    // _id crescente = mais antigos primeiro (já vencidos, se não pagos).
+    let consulta = Rifa.find({ status: "PENDENTE" satisfies RifaTypes.StatusRifaType }, { paymentId: 1, email: 1 })
+        .sort({ _id: 1 });
+    if (limite) consulta = consulta.limit(limite);
+    const pendentes = await consulta.lean();
+
+    const conferidos: PendenteConferido[] = [];
+
+    for (const { paymentId, email } of pendentes) {
+        try {
+            const pagamento = await buscarPagamento(paymentId);
+            const status = statusRifaDoPagamento(pagamento);
+            const aplicado = aplicar && (await aplicarStatusDoMercadoPago(pagamento)) !== null;
+
+            conferidos.push({ paymentId, status, email: email ?? pagamento.payer?.email ?? null, aplicado });
+        } catch (err) {
+            console.error("[reconciliar rifa] falha ao conferir", paymentId, err);
+            conferidos.push({ paymentId, status: "ERRO", email: email ?? null, aplicado: false });
+        }
+    }
+
+    return conferidos;
 };

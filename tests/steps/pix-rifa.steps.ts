@@ -110,6 +110,18 @@ Given(
 );
 
 Given(
+    "que existe um Pix da rifa {string} aprovado com o e-mail do pagador {string} na API do Mercado Pago",
+    function (paymentId: string, email: string) {
+        pixRifaFake(paymentId, {
+            status: "approved",
+            status_detail: "accredited",
+            date_approved: new Date().toISOString(),
+            payer: { email },
+        });
+    }
+);
+
+Given(
     "que existe um Pix da rifa {string} pendente e já vencido na API do Mercado Pago",
     function (paymentId: string) {
         pixRifaFake(paymentId, {

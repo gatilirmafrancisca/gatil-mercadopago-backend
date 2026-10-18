@@ -1,6 +1,6 @@
 import {type NextFunction, type Request, type Response} from "express";
 import { criarPreferenciaRifa } from "../mercadoPago/criarPreferenciaRifa.js";
-import { confirmarNumeroRifa, consultarStatusPixRifa, criarPixRifa, getAllRifasService, haNumerosDisponiveis } from "../services/rifa.service.js";
+import { confirmarNumeroRifa, consultarStatusPixRifa, criarPixRifa, getAllRifasService, haNumerosDisponiveis, reconciliarPendentesRifa } from "../services/rifa.service.js";
 import Rifa from "../models/Rifa.js";
 import type { AuthenticatedRequest } from "../middlewares/token.middleware.js";
 import { enviarEmailConfirmacao } from "../services/email.service.js";
@@ -121,6 +121,33 @@ export const reenviarEmail = async(req: Request, res: Response, next: NextFuncti
 
     } catch (error) {
 
+        next(error);
+    }
+}
+/** Por chamada do agendador: o resto vai na próxima (os mais antigos primeiro). */
+const LIMITE_RECONCILIACAO = 30;
+
+/**
+ * Chamado pelo Cron da Vercel (vercel.json), que manda
+ * "Authorization: Bearer <CRON_SECRET>". Sem CRON_SECRET configurado, a
+ * rota fica fechada.
+ */
+export const reconciliarPendentes = async(req: Request, res: Response, next: NextFunction) => {
+
+    try {
+
+        const segredo = process.env.CRON_SECRET;
+        if (!segredo || req.header("authorization") !== `Bearer ${segredo}`) {
+            return res.status(401).json({ message: "Não autorizado." });
+        }
+
+        const conferidos = await reconciliarPendentesRifa({ aplicar: true, limite: LIMITE_RECONCILIACAO });
+        const aplicados = conferidos.filter((c) => c.aplicado);
+
+        console.info("[reconciliar rifa]", conferidos.length, "pendente(s) conferido(s),", aplicados.length, "atualizado(s)");
+        res.json({ message: "Pendentes conferidos.", data: { conferidos: conferidos.length, atualizados: aplicados } });
+
+    } catch (error) {
         next(error);
     }
 }

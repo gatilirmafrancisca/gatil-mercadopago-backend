@@ -79,6 +79,7 @@ rifa-solidaria-backend/
 | `MP_WEBHOOK_SECRET` | Chave secreta mostrada ao cadastrar o webhook no painel, aba **produção** mesmo em conta de teste |
 | `FRONTEND_URL` | Usado nos `back_urls` da preferência e no CORS. Precisa ser HTTPS público — não funciona com `localhost` |
 | `JWT_SECRET` | Assina o token de posse emitido em `verificar-pagamento` |
+| `CRON_SECRET` | Autoriza o Cron da Vercel a chamar `/api/rifa/reconciliar-pendentes` — sem ela, a rota fica fechada (401) |
 | `RESEND_API_KEY` | Envio de e-mail |
 | `EMAIL_FROM` | Remetente, ex: `"Gatil Irmã Francisca <rifa@mail.gatilirmafrancisca.org>"` |
 
@@ -112,6 +113,7 @@ Cadastre a URL gerada no painel do Mercado Pago (**Webhooks → aba Modo de prod
 | `GET` | `/api/rifa/numeros-ocupados` | — | Lista os números já escolhidos, pra pintar a grade |
 | `POST` | `/api/rifa/confirmar-numero` | `Bearer <token>` | Reserva um número pro pagamento dono do token |
 | `POST` | `/api/rifa/reenviar-email` | — | Reenvia o e-mail de confirmação de um pagamento já resolvido |
+| `GET` | `/api/rifa/reconciliar-pendentes` | `Bearer <CRON_SECRET>` | Confere no MP os registros PENDENTE: pago → APROVADO, vencido/recusado → CANCELADO (Cron da Vercel, 1×/dia) |
 | `GET` | `/api/rifa/buscar-por-email` | — | Recupera o `payment_id` de uma compra perdida, por e-mail |
 
 ## Regras de negócio que valem saber antes de mexer
@@ -166,6 +168,11 @@ Cucumber + `supertest` batendo direto no `app` do Express (sem subir servidor nu
 - Status acompanha o Mercado Pago (inclusive expirado); Pix de doação e da rifa não se cruzam; `ref` de outra pessoa dá 404
 - Jornada: Pix aprovado → `verificar-pagamento` devolve o token e registra o bilhete
 
+**`reconciliar-pendentes.feature`**
+- Pix vencido ou expirado sem pagamento vira `CANCELADO` (e deixa de ocupar vaga); Pix pago que ficou `PENDENTE` vira `APROVADO`; os dois vão ao painel
+- A consulta de status da tela do Pix também atualiza o banco, mesmo sem webhook; um pagamento `APROVADO` nunca volta pra `CANCELADO`
+- E-mail do pagador fora do formato não impede o pagamento de ser aprovado
+
 **`preferencias-sem-pix.feature`**
 - As preferências de doação e de rifa só aceitam cartão (sem Pix nem boleto); a rifa fica sempre na campanha da rifa
 
@@ -188,6 +195,22 @@ npm run recuperar:rifa -- --desde 2026-09-01           # só lista
 npm run recuperar:rifa -- --desde 2026-09-01 --apply   # registra
 npm run recuperar:rifa -- 123456789 987654321 --apply  # IDs específicos
 ```
+
+## Pagamentos da rifa presos em PENDENTE
+
+O registro nasce `PENDENTE` quando o Pix é gerado (o Mercado Pago avisa o
+webhook antes de alguém pagar). Ele sai desse estado pelo webhook de
+aprovação/cancelamento, pela consulta de status da tela do Pix ou, se nada
+disso acontecer, pela conferência diária do Cron da Vercel
+(`/api/rifa/reconciliar-pendentes`, ver `vercel.json`). Pix vencido vira
+`CANCELADO` e libera a vaga. Para conferir na hora:
+
+```bash
+npm run reconciliar:rifa            # só lista o que mudaria
+npm run reconciliar:rifa -- --apply # atualiza banco e painel
+```
+
+Os aprovados saem com o link para a pessoa escolher o número.
 
 ## CI/CD
 
