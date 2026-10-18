@@ -15,6 +15,10 @@ const validateStringField = (value: unknown, fieldLabel: string): string => {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** E-mail num formato aceito pelo registro da rifa (ver validateEmailField). */
+export const ehEmailValido = (value: unknown): boolean =>
+    typeof value === "string" && EMAIL_REGEX.test(value.trim());
+
 const validateEmailField = (value: unknown, fieldLabel: string): string => {
     const normalized = validateStringField(value, fieldLabel);
     if (!EMAIL_REGEX.test(normalized)) {

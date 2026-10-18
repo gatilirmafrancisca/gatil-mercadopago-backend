@@ -79,6 +79,8 @@ rifa-solidaria-backend/
 | `MP_WEBHOOK_SECRET` | Chave secreta mostrada ao cadastrar o webhook no painel, aba **produção** mesmo em conta de teste |
 | `FRONTEND_URL` | Usado nos `back_urls` da preferência e no CORS. Precisa ser HTTPS público — não funciona com `localhost` |
 | `JWT_SECRET` | Assina o token de posse emitido em `verificar-pagamento` |
+| `CRON_SECRET` | Autoriza o Cron da Vercel a chamar `/api/rifa/tarefas-diarias` — sem ela, a rota fica fechada (401) |
+| `PIX_TESTE_CHAVE` | Liga o Pix de teste de R$ 0,01 (header `x-pix-teste`). Vazia = desligado |
 | `RESEND_API_KEY` | Envio de e-mail |
 | `EMAIL_FROM` | Remetente, ex: `"Gatil Irmã Francisca <rifa@mail.gatilirmafrancisca.org>"` |
 
@@ -112,6 +114,7 @@ Cadastre a URL gerada no painel do Mercado Pago (**Webhooks → aba Modo de prod
 | `GET` | `/api/rifa/numeros-ocupados` | — | Lista os números já escolhidos, pra pintar a grade |
 | `POST` | `/api/rifa/confirmar-numero` | `Bearer <token>` | Reserva um número pro pagamento dono do token |
 | `POST` | `/api/rifa/reenviar-email` | — | Reenvia o e-mail de confirmação de um pagamento já resolvido |
+| `GET` | `/api/rifa/tarefas-diarias` | `Bearer <CRON_SECRET>` | Cron da Vercel, 1×/dia: confere os PENDENTE vencidos no MP, envia os lembretes de escolha e sorteia os números com prazo vencido |
 | `GET` | `/api/rifa/buscar-por-email` | — | Recupera o `payment_id` de uma compra perdida, por e-mail |
 
 ## Regras de negócio que valem saber antes de mexer
@@ -166,6 +169,20 @@ Cucumber + `supertest` batendo direto no `app` do Express (sem subir servidor nu
 - Status acompanha o Mercado Pago (inclusive expirado); Pix de doação e da rifa não se cruzam; `ref` de outra pessoa dá 404
 - Jornada: Pix aprovado → `verificar-pagamento` devolve o token e registra o bilhete
 
+**`reconciliar-pendentes.feature`**
+- Pix vencido ou expirado sem pagamento vira `CANCELADO` (e deixa de ocupar vaga); Pix pago que ficou `PENDENTE` vira `APROVADO`; os dois vão ao painel
+- Isso acontece pelo Cron (com segredo) e também ao gerar um Pix ou abrir a grade; Pix recente nem é consultado
+- A consulta de status da tela do Pix também atualiza o banco, mesmo sem webhook; um pagamento `APROVADO` nunca volta pra `CANCELADO`
+- E-mail do pagador fora do formato não impede o pagamento de ser aprovado
+
+**`lembretes-escolha.feature`**
+- Lembretes com o link quando faltam 20, 15, 10, 5 e 1 dia(s), sem repetir e sem rajada; nada na primeira hora
+- Prazo vencido: número livre sorteado (nunca um ocupado) e confirmação enviada; quem escolheu sai dos lembretes
+
+**`pix-teste.feature`**
+- Chave certa → Pix de R$ 0,01 marcado como teste; sem chave → R$ 100; chave errada ou desligado → 403
+- O teste segue o fluxo da rifa, não ocupa vaga nem número real e vai ao painel com "[TESTE]"
+
 **`preferencias-sem-pix.feature`**
 - As preferências de doação e de rifa só aceitam cartão (sem Pix nem boleto); a rifa fica sempre na campanha da rifa
 
@@ -188,6 +205,58 @@ npm run recuperar:rifa -- --desde 2026-09-01           # só lista
 npm run recuperar:rifa -- --desde 2026-09-01 --apply   # registra
 npm run recuperar:rifa -- 123456789 987654321 --apply  # IDs específicos
 ```
+
+## Pagamentos da rifa presos em PENDENTE
+
+O registro nasce `PENDENTE` quando o Pix é gerado (o Mercado Pago avisa o
+webhook antes de alguém pagar). Ele sai desse estado pelo webhook de
+aprovação/cancelamento, pela consulta de status da tela do Pix ou, se nada
+disso acontecer, pelas **tarefas da rifa** (abaixo). Pix vencido vira
+`CANCELADO` e libera a vaga; pago vira `APROVADO`. Para conferir na hora:
+
+```bash
+npm run reconciliar:rifa            # só lista o que mudaria
+npm run reconciliar:rifa -- --apply # atualiza banco e painel
+```
+
+## Escolha do número: lembretes e sorteio
+
+Quem pagou e não escolheu o número tem **20 dias** (a partir de `aprovadoEm`)
+para escolher. Nesse prazo, recebe um e-mail com o link de escolha quando
+faltam **20, 15, 10, 5 e 1 dia(s)** — o último no último dia, e o primeiro só
+1 h depois da aprovação (a pessoa ainda pode estar escolhendo na tela). Só o
+lembrete mais recente sai: se as tarefas pararam uns dias, não chega uma
+rajada de e-mails. Vencido o prazo, um número livre é **sorteado** e a
+confirmação é enviada. Quem escolhe no meio do caminho para de receber
+lembretes. Aprovados de antes dessa regra ganham o prazo a partir da primeira
+execução.
+
+## Tarefas da rifa (no site e no Cron diário)
+
+A conferência dos pendentes vencidos e os lembretes/sorteios rodam:
+
+- **durante o uso do site** — ao gerar um Pix, abrir o pagamento por cartão
+  ou abrir a grade de números: no máximo a cada 5 minutos por instância e 5
+  registros por vez;
+- **1×/dia pelo Cron da Vercel** (`vercel.json`, 9h de Brasília) em
+  `GET /api/rifa/tarefas-diarias`, com `Authorization: Bearer <CRON_SECRET>`
+  — garante os e-mails mesmo em dias sem visitas.
+
+## Pix de teste (R$ 0,01)
+
+Para validar o fluxo da rifa em produção sem pagar o bilhete: com
+`PIX_TESTE_CHAVE` definida, um `POST /api/rifa/criar-pix` com o header
+`x-pix-teste: <PIX_TESTE_CHAVE>` cria um Pix de **R$ 0,01** com
+`metadata.teste = true`. O fluxo é o mesmo (webhook, status, escolha do número,
+e-mails com "[TESTE]" no assunto, painel com "[TESTE]" na descrição), mas o
+registro fica com `teste: true`: não ocupa vaga, não aparece na grade e um
+número escolhido no teste continua livre para um comprador real. Chave errada,
+ou variável vazia, dá 403 — nunca vira um Pix de R$ 100. No site, o
+frontend liga o modo pelo console (`gatilPixTeste("<chave>")` na página
+`/rifa`).
+
+Depois do deploy que trouxe o campo `teste`, rode uma vez
+`npm run migrate:indices -- --apply` para trocar o índice único do número.
 
 ## CI/CD
 

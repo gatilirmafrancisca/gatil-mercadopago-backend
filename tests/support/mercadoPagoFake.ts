@@ -23,6 +23,7 @@ interface PagamentoFake {
         tipo?: string;
         rastreio_id?: string;
         valor_esperado?: number;
+        teste?: boolean;
     };
 }
 
