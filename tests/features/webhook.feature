@@ -28,3 +28,8 @@ Funcionalidade: Recebimento de notificações do Mercado Pago
     E que existe um pagamento aprovado "999004" na API do Mercado Pago
     Quando o backend recebe uma notificação de webhook para "999004" com assinatura válida
     Então deve existir um documento com paymentId "999004" e status "APROVADO"
+
+  Cenário: Pix pago no Checkout Pro antigo, com outra campanha no link, é reconhecido como rifa
+    Dado que existe um Pix aprovado "999005" da preferência antiga da rifa com a campanha "CAMPANHA_ESPECIFICA"
+    Quando o backend recebe uma notificação de webhook para "999005" com assinatura válida
+    Então deve existir um documento com paymentId "999005" e status "APROVADO"

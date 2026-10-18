@@ -40,10 +40,15 @@ const CAMPANHA_RIFA = UTM_CAMPAIGN[1];
 
 /**
  * Pagamento da rifa: criado pela preferência ou pelo Pix da rifa (tipo
- * "RIFA"), ou por preferências antigas que só tinham utm_campaign.
+ * "RIFA"), ou por preferências antigas, que não tinham tipo. Nelas o
+ * utm_campaign vinha do link (um link com outra campanha tirava a compra
+ * da rifa), então a descrição — o título do bilhete, definido pelo
+ * servidor — também identifica a rifa.
  */
 export const ehPagamentoRifa = (pagamento: Pagamento): boolean =>
-    pagamento.metadata?.tipo === "RIFA" || pagamento.metadata?.utm_campaign === CAMPANHA_RIFA;
+    pagamento.metadata?.tipo === "RIFA"
+    || pagamento.metadata?.utm_campaign === CAMPANHA_RIFA
+    || pagamento.description === RifaTypes.DESCRICAO_RIFA;
 
 export const processarNotificacaoPagamento = async (body: any): Promise<void> => {
     const { type, data } = body ?? {};

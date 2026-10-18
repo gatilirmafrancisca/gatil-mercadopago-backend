@@ -40,3 +40,9 @@ Funcionalidade: Verificação de pagamento e emissão de token
     E que existe um pagamento com status "pending" "999015" na API do Mercado Pago
     Quando eu chamo "GET /mercadopago/verificar-pagamento?payment_id=999015"
     Então a resposta HTTP deve ser 402
+
+  Cenário: Pagamento aprovado que não é da rifa (ex: doação) não gera token
+    Dado que existe uma doação aprovada "999016" na API do Mercado Pago
+    Quando eu chamo "GET /mercadopago/verificar-pagamento?payment_id=999016"
+    Então a resposta HTTP deve ser 402
+    E a resposta não deve conter um campo "token"
