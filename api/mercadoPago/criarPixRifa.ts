@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { MercadoPagoConfig, Payment } from "mercadopago";
 import type { UtmMetadata } from "../types/origem.types.js";
-import { TICKET_PRICE_BRL } from "../types/rifa.types.js";
+import { DESCRICAO_RIFA, TICKET_PRICE_BRL } from "../types/rifa.types.js";
 import { formatarDataMP, PIX_EXPIRACAO_MINUTOS } from "./criarPixDoacao.js";
 
 function getClient() {
@@ -26,7 +26,7 @@ export const mercadoPagoPixRifaClient = {
       body: {
         // Valor do bilhete definido aqui, nunca pelo navegador.
         transaction_amount: TICKET_PRICE_BRL,
-        description: "Número da Rifa Solidária — Gatil Irmã Francisca",
+        description: DESCRICAO_RIFA,
         payment_method_id: "pix",
         payer: { email },
         external_reference: rastreioId,

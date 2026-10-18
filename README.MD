@@ -175,6 +175,20 @@ Cucumber + `supertest` batendo direto no `app` do Express (sem subir servidor nu
 **`retorno-rifa.feature`**
 - As `back_urls` da preferência da rifa apontam para `/rifa/pagamento-aprovado`, `/rifa/pagamento-pendente` e `/rifa/pagamento-recusado` — separadas das páginas de retorno da doação (`/doar/pagamento-aprovado`, `/doar/pagamento-pendente` e `/doar/pagamento-recusado`)
 
+## Recuperar pagamentos da rifa que não chegaram ao banco
+
+Um pagamento aprovado no Mercado Pago só entra no banco pelo webhook ou
+quando a pessoa volta ao site (`/rifa/pagamento-aprovado`). Se nenhum dos
+dois acontecer (ex: Pix pago pelo Checkout Pro antigo, sem voltar ao site),
+o script abaixo encontra esses pagamentos e os registra como APROVADO, sem
+número, imprimindo o link para cada pessoa escolher o número:
+
+```bash
+npm run recuperar:rifa -- --desde 2026-09-01           # só lista
+npm run recuperar:rifa -- --desde 2026-09-01 --apply   # registra
+npm run recuperar:rifa -- 123456789 987654321 --apply  # IDs específicos
+```
+
 ## CI/CD
 
 `.github/workflows/tests.yml` roda `npm run test:bdd` em todo `pull_request` e push pra `main` — nenhuma mudança que quebre a proteção de corrida (ou qualquer outro cenário) chega a `main` sem o CI acusar.
