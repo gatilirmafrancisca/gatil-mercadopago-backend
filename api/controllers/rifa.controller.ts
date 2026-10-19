@@ -145,11 +145,12 @@ export const tarefasDiarias = async(req: Request, res: Response, next: NextFunct
             return res.status(401).json({ message: "Não autorizado." });
         }
 
-        const { pendentes, escolhas } = await tarefasDaRifa({ limite: LIMITE_TAREFAS_DIARIAS });
+        const { pendentes, contatos, escolhas } = await tarefasDaRifa({ limite: LIMITE_TAREFAS_DIARIAS });
         const atualizados = pendentes.filter((c) => c.aplicado);
 
         console.info(
             "[tarefas rifa]", pendentes.length, "pendente(s) conferido(s),", atualizados.length, "atualizado(s),",
+            contatos.filter((c) => c.email).length, "e-mail(s) encontrado(s),",
             escolhas.lembretes.length, "lembrete(s),", escolhas.sorteados.length, "sorteio(s)"
         );
         res.json({
@@ -157,6 +158,7 @@ export const tarefasDiarias = async(req: Request, res: Response, next: NextFunct
             data: {
                 conferidos: pendentes.length,
                 atualizados,
+                contatos,
                 lembretes: escolhas.lembretes,
                 sorteados: escolhas.sorteados,
             },

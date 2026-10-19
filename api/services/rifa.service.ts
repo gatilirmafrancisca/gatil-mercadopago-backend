@@ -112,13 +112,45 @@ export const sincronizarPagamentoRifa = async (
             await Rifa.updateOne({ paymentId, aprovadoEm: null }, { $set: { aprovadoEm: new Date() } });
         }
 
-        // Só preenche o e-mail do MP se o participante ainda não informou um.
-        if (dadosBase.email) {
-            await Rifa.updateOne({ paymentId, email: null }, { $set: { email: dadosBase.email } });
-        }
+        // Contato só é preenchido se ainda estiver vazio: nunca sobrescreve o
+        // e-mail que o participante informou ao escolher o número.
+        await preencherContatoVazio(paymentId, dadosBase);
     }
 };
 
+
+/** Preenche e-mail, nome do pagador e meio de pagamento que ainda estejam vazios. */
+const preencherContatoVazio = async (
+    paymentId: string,
+    { email, nomePagador, metodoPagamento }: Partial<Omit<IRifa, "paymentId">>
+): Promise<void> => {
+    const campos = { email, nomePagador, metodoPagamento };
+    for (const [campo, valor] of Object.entries(campos)) {
+        if (!valor) continue;
+        await Rifa.updateOne({ paymentId, [campo]: null }, { $set: { [campo]: valor } });
+    }
+};
+
+/**
+ * Grava o Pix da rifa no banco assim que ele é gerado, com o e-mail digitado
+ * no site — sem depender do Mercado Pago devolver o payer.email depois. Se o
+ * webhook chegou antes, só completa o contato (nunca rebaixa o status).
+ */
+const guardarPixGerado = async (paymentId: string, email: string, teste: boolean): Promise<void> => {
+    const dados: Partial<Omit<IRifa, "paymentId">> = {
+        status: "PENDENTE",
+        amount: teste ? RifaTypes.VALOR_PIX_TESTE_BRL : RifaTypes.TICKET_PRICE_BRL,
+        email,
+        metodoPagamento: "pix",
+        ...(teste ? { teste: true } : {}),
+    };
+    try {
+        await registrarPagamentoRifa(paymentId, dados);
+    } catch (error) {
+        if (!(error instanceof ConflictError)) throw error;
+        await preencherContatoVazio(paymentId, dados);
+    }
+};
 
 export const confirmarNumeroRifa =async (paymentId: string, data: Record<string, any>): Promise<ResponseType> => {
     try {
@@ -252,6 +284,11 @@ export const criarPixRifa = async ({ email, origem = {}, chaveTeste }: CriarPixR
             throw new Error("O Mercado Pago não devolveu o QR code do Pix.");
         }
 
+        // Falha aqui não pode impedir a pessoa de pagar: o webhook registra depois.
+        await guardarPixGerado(String(pagamento.id), emailNormalizado, teste).catch((err) =>
+            console.error("[criar-pix rifa] falha ao gravar o Pix gerado", pagamento.id, err)
+        );
+
         return {
             status: 201,
             message: "Pix criado com sucesso.",
@@ -303,7 +340,24 @@ export const consultarStatusPixRifa = async (paymentId: unknown, ref: unknown): 
 // ---------- Pendentes: banco x Mercado Pago ----------
 
 /** Status da rifa no banco para um pagamento do MP: Pix vencido é CANCELADO. */
+/**
+ * Pix sem data de expiração (ex: Checkout Pro antigo) que segue pendente
+ * depois disso já não vale: a validade padrão do Pix no MP é de 24 h.
+ */
+const PIX_SEM_EXPIRACAO_VENCE_MS = 24 * 60 * 60_000;
+
 export const statusRifaDoPagamento = (pagamento: Pagamento): RifaTypes.StatusRifaType => {
+    if (
+        pagamento.payment_method_id === "pix"
+        && pagamento.status === "pending"
+        && !pagamento.date_of_expiration
+        && pagamento.date_created
+        && Date.now() - Date.parse(pagamento.date_created) > PIX_SEM_EXPIRACAO_VENCE_MS
+    ) {
+        return "CANCELADO";
+    }
+
+    // Cartão em análise (in_process) continua PENDENTE: o MP ainda pode aprovar.
     const status = statusDoPix(pagamento);
     return status === "EXPIRADO" ? "CANCELADO" : status;
 };
@@ -399,19 +453,72 @@ export const conferirPendentesVencidos = (limite: number) =>
         criadosAntesDe: new Date(Date.now() - IDADE_PENDENTE_VENCIDO_MS),
     });
 
+export interface ContatoCompletado {
+    paymentId: string;
+    email: string | null;
+    nomePagador: string | null;
+    metodoPagamento: string | null;
+}
+
+/**
+ * Pagamentos sem número (PENDENTE ou APROVADO) que estão sem e-mail ou sem
+ * meio de pagamento: busca no MP o e-mail (payer.email ou o digitado no site),
+ * o nome de quem pagou e o meio de pagamento. Cada registro é conferido uma
+ * vez (contatoConferidoEm) — se o MP não tem o e-mail, o painel permite
+ * informar à mão. Cadastros manuais (MANUAL-…) não existem no MP.
+ */
+export const completarContatosRifa = async (
+    { limite, aplicar = true }: { limite?: number; aplicar?: boolean }
+): Promise<ContatoCompletado[]> => {
+
+    let consulta = Rifa.find({
+        status: { $in: ["PENDENTE", "APROVADO"] satisfies RifaTypes.StatusRifaType[] },
+        claimedNumber: null,
+        paymentId: { $not: /^MANUAL-/ },
+        contatoConferidoEm: null,
+        $or: [{ email: null }, { metodoPagamento: null }],
+    }, { paymentId: 1 }).sort({ _id: 1 });
+    if (limite) consulta = consulta.limit(limite);
+    const registros = await consulta.lean();
+
+    return Promise.all(registros.map(async ({ paymentId }): Promise<ContatoCompletado> => {
+        try {
+            const pagamento = await buscarPagamento(paymentId);
+            const { email = null, nomePagador = null, metodoPagamento = null } = dadosRifaDoPagamento(pagamento);
+            if (aplicar) {
+                await preencherContatoVazio(paymentId, { email, nomePagador, metodoPagamento });
+                await Rifa.updateOne({ paymentId }, { $set: { contatoConferidoEm: new Date() } });
+            }
+            return { paymentId, email, nomePagador, metodoPagamento };
+        } catch (err) {
+            console.error("[contatos rifa] falha ao buscar contato", paymentId, err);
+            return { paymentId, email: null, nomePagador: null, metodoPagamento: null };
+        }
+    }));
+};
+
 export interface ResultadoTarefas {
     pendentes: PendenteConferido[];
+    contatos: ContatoCompletado[];
     escolhas: ResultadoEscolhas;
 }
 
-/** Confere os pendentes vencidos e cuida de quem pagou e não escolheu o número. */
+/**
+ * Confere os pendentes vencidos, completa o contato de quem está sem e-mail e
+ * cuida de quem pagou e não escolheu o número (lembretes e sorteio) — nessa
+ * ordem, para o e-mail encontrado já valer para o lembrete da mesma execução.
+ */
 export const tarefasDaRifa = async ({ limite }: { limite: number }): Promise<ResultadoTarefas> => {
     const pendentes = await conferirPendentesVencidos(limite).catch((err) => {
         console.error("[tarefas rifa] falha ao conferir pendentes", err);
         return [] as PendenteConferido[];
     });
+    const contatos = await completarContatosRifa({ limite }).catch((err) => {
+        console.error("[tarefas rifa] falha ao completar contatos", err);
+        return [] as ContatoCompletado[];
+    });
     const escolhas = await processarEscolhasPendentes({ limite });
-    return { pendentes, escolhas };
+    return { pendentes, contatos, escolhas };
 };
 
 const INTERVALO_TAREFAS_NO_USO_MS = 5 * 60_000;

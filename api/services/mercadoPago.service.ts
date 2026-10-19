@@ -5,6 +5,7 @@ import { sincronizarPagamentoRifa } from "./rifa.service.js";
 import { ConflictError } from "../utils/errors.js";
 import { UTM_CAMPAIGN } from "../types/origem.types.js";
 import { registrarConversaoDoacao } from "./conversao.service.js";
+import { ehEmailValido } from "../utils/rifavalidar.js";
 
 
 interface IPayload {
@@ -55,6 +56,31 @@ export const ehPagamentoTeste = (pagamento: Pagamento): boolean =>
     pagamento.metadata?.teste === true || pagamento.metadata?.teste === "true";
 
 /**
+ * E-mail de quem pagou: o do pagador no MP ou, se ele não vier (acontece no
+ * Pix e no cartão), o que a pessoa digitou no site (metadata.email_contato).
+ */
+export const emailDoPagamento = (pagamento: Pagamento): string | null => {
+    const candidatos = [pagamento.payer?.email, pagamento.metadata?.email_contato];
+    return (candidatos.find((e) => ehEmailValido(e)) as string | undefined)?.trim() ?? null;
+};
+
+/** Nome de quem pagou: pagador, quem fez o Pix (banco) ou titular do cartão. */
+export const nomeDoPagador = (pagamento: Pagamento): string | null => {
+    const pagador = [pagamento.payer?.first_name, pagamento.payer?.last_name].filter(Boolean).join(" ").trim();
+    const nomePix = (pagamento as any).point_of_interaction?.transaction_data?.bank_info?.payer?.long_name;
+    const titular = (pagamento as any).card?.cardholder?.name;
+    const nome = [pagador, nomePix, titular].find((n) => typeof n === "string" && n.trim());
+    return nome ? String(nome).trim() : null;
+};
+
+/** pix, cartao, ou o tipo que o MP informar. */
+export const metodoDoPagamento = (pagamento: Pagamento): string | null => {
+    if (pagamento.payment_method_id === "pix") return "pix";
+    if (pagamento.payment_type_id === "credit_card" || pagamento.payment_type_id === "debit_card") return "cartao";
+    return pagamento.payment_type_id ?? pagamento.payment_method_id ?? null;
+};
+
+/**
  * O que o banco da rifa guarda de um pagamento do MP. O valor é o do
  * bilhete — no Pix de teste, o valor cobrado (R$ 0,01).
  */
@@ -63,12 +89,17 @@ export const dadosRifaDoPagamento = (
     status: RifaTypes.StatusRifaType = mapearStatusMP(pagamento.status ?? "pending"),
 ): Partial<Omit<IRifa, "paymentId">> => {
     const teste = ehPagamentoTeste(pagamento);
+    const email = emailDoPagamento(pagamento);
+    const nomePagador = nomeDoPagador(pagamento);
+    const metodoPagamento = metodoDoPagamento(pagamento);
     return {
         status,
         amount: teste ? (pagamento.transaction_amount ?? 0) : RifaTypes.TICKET_PRICE_BRL,
         // Só true é gravado: ver o índice único em models/Rifa.ts.
         ...(teste ? { teste: true } : {}),
-        ...(pagamento.payer?.email ? { email: pagamento.payer.email } : {}),
+        ...(email ? { email } : {}),
+        ...(nomePagador ? { nomePagador } : {}),
+        ...(metodoPagamento ? { metodoPagamento } : {}),
     };
 };
 
