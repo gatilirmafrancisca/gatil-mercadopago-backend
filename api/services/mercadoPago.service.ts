@@ -64,13 +64,21 @@ export const emailDoPagamento = (pagamento: Pagamento): string | null => {
     return (candidatos.find((e) => ehEmailValido(e)) as string | undefined)?.trim() ?? null;
 };
 
-/** Nome de quem pagou: pagador, quem fez o Pix (banco) ou titular do cartão. */
+/** Nome de quem pagou: o do pagador ou o titular do cartão. */
 export const nomeDoPagador = (pagamento: Pagamento): string | null => {
     const pagador = [pagamento.payer?.first_name, pagamento.payer?.last_name].filter(Boolean).join(" ").trim();
-    const nomePix = (pagamento as any).point_of_interaction?.transaction_data?.bank_info?.payer?.long_name;
     const titular = (pagamento as any).card?.cardholder?.name;
-    const nome = [pagador, nomePix, titular].find((n) => typeof n === "string" && n.trim());
+    const nome = [pagador, titular].find((n) => typeof n === "string" && n.trim());
     return nome ? String(nome).trim() : null;
+};
+
+/**
+ * Banco de onde saiu o Pix (ex: "NU PAGAMENTOS S.A."). É a instituição, não a
+ * pessoa — o MP não devolve o nome nem o e-mail de quem fez o Pix.
+ */
+export const bancoDoPagador = (pagamento: Pagamento): string | null => {
+    const banco = (pagamento as any).point_of_interaction?.transaction_data?.bank_info?.payer?.long_name;
+    return typeof banco === "string" && banco.trim() ? banco.trim() : null;
 };
 
 /** pix, cartao, ou o tipo que o MP informar. */
@@ -91,7 +99,9 @@ export const dadosRifaDoPagamento = (
     const teste = ehPagamentoTeste(pagamento);
     const email = emailDoPagamento(pagamento);
     const nomePagador = nomeDoPagador(pagamento);
+    const bancoPagador = bancoDoPagador(pagamento);
     const metodoPagamento = metodoDoPagamento(pagamento);
+    const dataPagamento = pagamento.date_approved ? new Date(pagamento.date_approved) : null;
     return {
         status,
         amount: teste ? (pagamento.transaction_amount ?? 0) : RifaTypes.TICKET_PRICE_BRL,
@@ -99,7 +109,9 @@ export const dadosRifaDoPagamento = (
         ...(teste ? { teste: true } : {}),
         ...(email ? { email } : {}),
         ...(nomePagador ? { nomePagador } : {}),
+        ...(bancoPagador ? { bancoPagador } : {}),
         ...(metodoPagamento ? { metodoPagamento } : {}),
+        ...(dataPagamento ? { dataPagamento } : {}),
     };
 };
 

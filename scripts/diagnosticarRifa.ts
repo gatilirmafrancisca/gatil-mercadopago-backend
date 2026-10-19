@@ -15,7 +15,7 @@ import mongoose from "mongoose";
 import Rifa from "../api/models/Rifa.js";
 import { buscarPagamento } from "../api/mercadoPago/buscarPagamento.js";
 import { completarContatosRifa, statusRifaDoPagamento } from "../api/services/rifa.service.js";
-import { emailDoPagamento, metodoDoPagamento, nomeDoPagador } from "../api/services/mercadoPago.service.js";
+import { bancoDoPagador, emailDoPagamento, metodoDoPagamento, nomeDoPagador } from "../api/services/mercadoPago.service.js";
 
 const aplicar = process.argv.slice(2).includes("--apply");
 const definida = (nome: string) => (process.env[nome] ? "ok" : "NÃO DEFINIDA");
@@ -61,7 +61,7 @@ async function main() {
             );
             console.log(
                 `            payer.email: ${p.payer?.email || "—"} · email_contato: ${p.metadata?.email_contato || "—"}` +
-                ` · nome: ${nomeDoPagador(p) ?? "—"} · meio: ${metodoDoPagamento(p) ?? "—"}`
+                ` · nome: ${nomeDoPagador(p) ?? "—"} · banco: ${bancoDoPagador(p) ?? "—"} · meio: ${metodoDoPagamento(p) ?? "—"}`
             );
             console.log(`    tarefas → status ${statusRifaDoPagamento(p)} · e-mail usado: ${emailDoPagamento(p) ?? "nenhum (informe no painel)"}\n`);
         } catch (err: any) {
