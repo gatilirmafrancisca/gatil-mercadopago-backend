@@ -41,6 +41,9 @@ export const mercadoPagoPixRifaClient = {
           utm_source: origem.utmSource ?? null,
           utm_medium: origem.utmMedium ?? null,
           utm_campaign: "RIFA_SOLIDARIA",
+          // O MP nem sempre devolve o payer.email: é daqui que sai o e-mail
+          // dos lembretes de escolha do número (emailDoPagamento).
+          email_contato: email,
           ...(teste ? { teste: true } : {}),
         },
       },

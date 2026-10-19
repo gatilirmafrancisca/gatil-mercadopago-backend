@@ -15,6 +15,7 @@
     "migrate:indices": "tsx scripts/sincronizarIndices.ts",
     "recuperar:rifa": "tsx scripts/recuperarPagamentosRifa.ts",
     "reconciliar:rifa": "tsx scripts/reconciliarPendentesRifa.ts",
+    "diagnosticar:rifa": "tsx scripts/diagnosticarRifa.ts",
     "test:bdd": "tsx node_modules/@cucumber/cucumber/bin/cucumber-js"
   },
   "dependencies": {

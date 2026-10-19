@@ -15,7 +15,11 @@ interface PagamentoFake {
     date_created?: string;
     date_approved?: string;
     date_of_expiration?: string;
-    payer?: { email?: string; first_name?: string };
+    payer?: { email?: string | null; first_name?: string; last_name?: string };
+    payment_method_id?: string;
+    payment_type_id?: string;
+    point_of_interaction?: { transaction_data?: { bank_info?: { payer?: { long_name?: string } } } };
+    card?: { cardholder?: { name?: string } };
     metadata?: {
         utm_source?: string | null;
         utm_medium?: string | null;
@@ -24,6 +28,7 @@ interface PagamentoFake {
         rastreio_id?: string;
         valor_esperado?: number;
         teste?: boolean;
+        email_contato?: string;
     };
 }
 
