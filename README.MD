@@ -231,6 +231,25 @@ confirmação é enviada. Quem escolhe no meio do caminho para de receber
 lembretes. Aprovados de antes dessa regra ganham o prazo a partir da primeira
 execução.
 
+## E-mail de quem pagou
+
+Sem e-mail não sai lembrete nem confirmação. O e-mail vem, nesta ordem, do
+`payer.email` do Mercado Pago ou do que a pessoa digitou no Pix do site
+(`metadata.email_contato` — o MP nem sempre devolve o `payer.email`). O Pix do
+site também já grava o registro com esse e-mail no momento em que é gerado.
+Para os pagamentos que ficaram sem e-mail, as tarefas buscam no MP o e-mail, o
+nome de quem pagou (Pix: nome do banco; cartão: titular) e o meio de pagamento
+— uma vez por registro (`contatoConferidoEm`). O que o MP não tiver, o painel
+permite informar à mão. Para ver a situação na hora:
+
+```bash
+npm run diagnosticar:rifa             # só mostra (banco x Mercado Pago)
+npm run diagnosticar:rifa -- --apply  # grava os contatos encontrados
+```
+
+Pix pendente **sem** data de expiração e criado há mais de 24 h (ex: Checkout
+Pro antigo) conta como vencido; cartão em análise segue pendente.
+
 ## Tarefas da rifa (no site e no Cron diário)
 
 A conferência dos pendentes vencidos e os lembretes/sorteios rodam:
