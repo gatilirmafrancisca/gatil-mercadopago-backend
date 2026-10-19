@@ -21,10 +21,14 @@ export interface IRifa {
     aprovadoEm: Date | null;
     // Marcos de lembrete já enviados (dias restantes: 20, 15, 10, 5, 1).
     lembretesEnviados: number[];
-    // Contato de quem pagou, para quando o e-mail não vier: nome no Pix
-    // (banco) ou titular do cartão; e o meio de pagamento (pix, cartao...).
+    // Contato de quem pagou, para quando o e-mail não vier (no Pix o MP
+    // devolve o e-mail mascarado): nome do pagador ou titular do cartão, banco
+    // de origem do Pix, meio de pagamento (pix, cartao...) e quando foi pago —
+    // o que ajuda a achar o pagamento no extrato.
     nomePagador?: string | null;
+    bancoPagador?: string | null;
     metodoPagamento?: string | null;
+    dataPagamento?: Date | null;
     // Quando as tarefas buscaram o contato no MP (não busca de novo).
     contatoConferidoEm?: Date | null;
 
@@ -51,7 +55,9 @@ const RifaSchema: Schema<IRifa> = new mongoose.Schema({
     aprovadoEm: { type: Date, default: null },
     lembretesEnviados: { type: [Number], default: [] },
     nomePagador: { type: String, default: null },
+    bancoPagador: { type: String, default: null },
     metodoPagamento: { type: String, default: null },
+    dataPagamento: { type: Date, default: null },
     contatoConferidoEm: { type: Date, default: null },
     teste: { type: Boolean },
 });

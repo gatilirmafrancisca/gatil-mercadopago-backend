@@ -119,12 +119,12 @@ export const sincronizarPagamentoRifa = async (
 };
 
 
-/** Preenche e-mail, nome do pagador e meio de pagamento que ainda estejam vazios. */
+/** Preenche os dados de contato (e-mail, pagador, banco, meio, data) que ainda estejam vazios. */
 const preencherContatoVazio = async (
     paymentId: string,
-    { email, nomePagador, metodoPagamento }: Partial<Omit<IRifa, "paymentId">>
+    { email, nomePagador, bancoPagador, metodoPagamento, dataPagamento }: Partial<Omit<IRifa, "paymentId">>
 ): Promise<void> => {
-    const campos = { email, nomePagador, metodoPagamento };
+    const campos = { email, nomePagador, bancoPagador, metodoPagamento, dataPagamento };
     for (const [campo, valor] of Object.entries(campos)) {
         if (!valor) continue;
         await Rifa.updateOne({ paymentId, [campo]: null }, { $set: { [campo]: valor } });
@@ -457,6 +457,7 @@ export interface ContatoCompletado {
     paymentId: string;
     email: string | null;
     nomePagador: string | null;
+    bancoPagador: string | null;
     metodoPagamento: string | null;
 }
 
@@ -484,15 +485,21 @@ export const completarContatosRifa = async (
     return Promise.all(registros.map(async ({ paymentId }): Promise<ContatoCompletado> => {
         try {
             const pagamento = await buscarPagamento(paymentId);
-            const { email = null, nomePagador = null, metodoPagamento = null } = dadosRifaDoPagamento(pagamento);
+            const dados = dadosRifaDoPagamento(pagamento);
             if (aplicar) {
-                await preencherContatoVazio(paymentId, { email, nomePagador, metodoPagamento });
+                await preencherContatoVazio(paymentId, dados);
                 await Rifa.updateOne({ paymentId }, { $set: { contatoConferidoEm: new Date() } });
             }
-            return { paymentId, email, nomePagador, metodoPagamento };
+            return {
+                paymentId,
+                email: dados.email ?? null,
+                nomePagador: dados.nomePagador ?? null,
+                bancoPagador: dados.bancoPagador ?? null,
+                metodoPagamento: dados.metodoPagamento ?? null,
+            };
         } catch (err) {
             console.error("[contatos rifa] falha ao buscar contato", paymentId, err);
-            return { paymentId, email: null, nomePagador: null, metodoPagamento: null };
+            return { paymentId, email: null, nomePagador: null, bancoPagador: null, metodoPagamento: null };
         }
     }));
 };
