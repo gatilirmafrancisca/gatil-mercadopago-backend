@@ -1,4 +1,4 @@
-import Rifa, { type IRifa } from "../models/Rifa.js";
+import Rifa, { type IRifa, semReservaVencida } from "../models/Rifa.js";
 import { ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import {
     normalizarDadosCriacaoRifa,
@@ -25,6 +25,7 @@ import { dadosRifaDoPagamento, sincronizarFinanceiroDoPagamento } from "./mercad
 import { processarEscolhasPendentes, type ResultadoEscolhas } from "./lembretes.service.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { Types } from "mongoose";
+import { processarPagamentoPedido, tarefasDosPedidos, type ResultadoTarefasPedidos } from "./pedido.service.js";
 
 type Pagamento = Awaited<ReturnType<typeof buscarPagamento>>;
 
@@ -34,6 +35,8 @@ export const haNumerosDisponiveis = async (): Promise<boolean> => {
     const vagasOcupadas = await Rifa.countDocuments({
         status: { $ne: "CANCELADO" satisfies RifaTypes.StatusRifaType },
         teste: { $ne: true },
+        // Reserva vencida (ainda não apagada) não ocupa vaga.
+        ...semReservaVencida(),
     });
     return vagasOcupadas < RifaTypes.TOTAL_NUMEROS;
 };
@@ -119,12 +122,12 @@ export const sincronizarPagamentoRifa = async (
 };
 
 
-/** Preenche e-mail, nome do pagador e meio de pagamento que ainda estejam vazios. */
+/** Preenche os dados de contato (e-mail, pagador, banco, meio, data) que ainda estejam vazios. */
 const preencherContatoVazio = async (
     paymentId: string,
-    { email, nomePagador, metodoPagamento }: Partial<Omit<IRifa, "paymentId">>
+    { email, nomePagador, bancoPagador, metodoPagamento, dataPagamento }: Partial<Omit<IRifa, "paymentId">>
 ): Promise<void> => {
-    const campos = { email, nomePagador, metodoPagamento };
+    const campos = { email, nomePagador, bancoPagador, metodoPagamento, dataPagamento };
     for (const [campo, valor] of Object.entries(campos)) {
         if (!valor) continue;
         await Rifa.updateOne({ paymentId, [campo]: null }, { $set: { [campo]: valor } });
@@ -213,8 +216,9 @@ export const getAllRifasService = async (): Promise<ResponseType> => {
 
         await executarTarefasNoUso();
 
-        // Números de Pix de teste não ocupam a grade real.
-        const rifas = await Rifa.find({ claimedNumber: { $ne: null }, teste: { $ne: true } }).distinct("claimedNumber");
+        // Números de Pix de teste não ocupam a grade real. Reservas ativas
+        // aparecem como ocupadas; as vencidas, como livres.
+        const rifas = await Rifa.find({ claimedNumber: { $ne: null }, teste: { $ne: true }, ...semReservaVencida() }).distinct("claimedNumber");
         return { status: 200, message: "Rifas encontradas.", data: rifas };
 
     } catch (error: any) {
@@ -234,7 +238,7 @@ interface CriarPixRifaArgs {
 }
 
 /** Compara com PIX_TESTE_CHAVE em tempo constante. Sem a variável, o modo teste fica desligado. */
-const chavePixTesteValida = (chave: unknown): boolean => {
+export const chavePixTesteValida = (chave: unknown): boolean => {
     const esperada = process.env.PIX_TESTE_CHAVE;
     if (!esperada || typeof chave !== "string" || !chave) return false;
     // Hash dos dois lados: timingSafeEqual exige o mesmo tamanho.
@@ -321,6 +325,17 @@ export const consultarStatusPixRifa = async (paymentId: unknown, ref: unknown): 
     const pagamento = await buscarPixDoSite(paymentId, ref, "RIFA");
     const status = statusDoPix(pagamento);
 
+    // Pix de uma compra com reserva: aprovado, confirma os números aqui mesmo
+    // (o webhook pode atrasar) e devolve o resumo da compra.
+    if (pagamento.metadata?.pedido_id) {
+        if (status !== "APROVADO") return { status: 200, message: "Status do Pix.", data: { status } };
+        const compra = await processarPagamentoPedido(pagamento);
+        await sincronizarFinanceiroDoPagamento(pagamento, "APROVADO").catch((err) =>
+            console.error("[status-pix pedido] falha ao sincronizar painel", pagamento.id, err)
+        );
+        return { status: 200, message: "Status do Pix.", data: { status, compra } };
+    }
+
     // O webhook é quem registra; isso só cobre o caso de ele atrasar ou
     // falhar enquanto a pessoa está com o Pix na tela. Falha aqui não pode
     // impedir o front de seguir.
@@ -374,6 +389,16 @@ export const aplicarStatusDoMercadoPago = async (
 
     const paymentId = String(pagamento.id);
     const status = statusRifaDoPagamento(pagamento);
+
+    // Compra com reserva: os números já existem (pedido.service.ts).
+    if (pagamento.metadata?.pedido_id) {
+        if (status !== "APROVADO") return null;
+        await processarPagamentoPedido(pagamento);
+        await sincronizarFinanceiroDoPagamento(pagamento, status).catch((err) =>
+            console.error("[rifa] falha ao sincronizar painel", paymentId, err)
+        );
+        return status;
+    }
 
     if (status === "APROVADO") {
         const registro = await Rifa.findOne({ paymentId }, { status: 1 }).lean();
@@ -457,6 +482,7 @@ export interface ContatoCompletado {
     paymentId: string;
     email: string | null;
     nomePagador: string | null;
+    bancoPagador: string | null;
     metodoPagamento: string | null;
 }
 
@@ -474,7 +500,8 @@ export const completarContatosRifa = async (
     let consulta = Rifa.find({
         status: { $in: ["PENDENTE", "APROVADO"] satisfies RifaTypes.StatusRifaType[] },
         claimedNumber: null,
-        paymentId: { $not: /^MANUAL-/ },
+        // Cadastro manual e números de pedido não existem no MP com esse id.
+        paymentId: { $not: /^(MANUAL|PEDIDO)-/ },
         contatoConferidoEm: null,
         $or: [{ email: null }, { metodoPagamento: null }],
     }, { paymentId: 1 }).sort({ _id: 1 });
@@ -484,15 +511,21 @@ export const completarContatosRifa = async (
     return Promise.all(registros.map(async ({ paymentId }): Promise<ContatoCompletado> => {
         try {
             const pagamento = await buscarPagamento(paymentId);
-            const { email = null, nomePagador = null, metodoPagamento = null } = dadosRifaDoPagamento(pagamento);
+            const dados = dadosRifaDoPagamento(pagamento);
             if (aplicar) {
-                await preencherContatoVazio(paymentId, { email, nomePagador, metodoPagamento });
+                await preencherContatoVazio(paymentId, dados);
                 await Rifa.updateOne({ paymentId }, { $set: { contatoConferidoEm: new Date() } });
             }
-            return { paymentId, email, nomePagador, metodoPagamento };
+            return {
+                paymentId,
+                email: dados.email ?? null,
+                nomePagador: dados.nomePagador ?? null,
+                bancoPagador: dados.bancoPagador ?? null,
+                metodoPagamento: dados.metodoPagamento ?? null,
+            };
         } catch (err) {
             console.error("[contatos rifa] falha ao buscar contato", paymentId, err);
-            return { paymentId, email: null, nomePagador: null, metodoPagamento: null };
+            return { paymentId, email: null, nomePagador: null, bancoPagador: null, metodoPagamento: null };
         }
     }));
 };
@@ -501,6 +534,7 @@ export interface ResultadoTarefas {
     pendentes: PendenteConferido[];
     contatos: ContatoCompletado[];
     escolhas: ResultadoEscolhas;
+    pedidos: ResultadoTarefasPedidos;
 }
 
 /**
@@ -517,8 +551,12 @@ export const tarefasDaRifa = async ({ limite }: { limite: number }): Promise<Res
         console.error("[tarefas rifa] falha ao completar contatos", err);
         return [] as ContatoCompletado[];
     });
+    const pedidos = await tarefasDosPedidos().catch((err) => {
+        console.error("[tarefas rifa] falha nas tarefas dos pedidos", err);
+        return { expirados: 0, reservasApagadas: 0, anonimizados: 0 } as ResultadoTarefasPedidos;
+    });
     const escolhas = await processarEscolhasPendentes({ limite });
-    return { pendentes, contatos, escolhas };
+    return { pendentes, contatos, escolhas, pedidos };
 };
 
 const INTERVALO_TAREFAS_NO_USO_MS = 5 * 60_000;

@@ -83,6 +83,9 @@ rifa-solidaria-backend/
 | `PIX_TESTE_CHAVE` | Liga o Pix de teste de R$ 0,01 (header `x-pix-teste`). Vazia = desligado |
 | `RESEND_API_KEY` | Envio de e-mail |
 | `EMAIL_FROM` | Remetente, ex: `"Gatil Irmã Francisca <rifa@mail.gatilirmafrancisca.org>"` |
+| `TURNSTILE_SECRET` | Chave secreta do Cloudflare Turnstile (anti-robô em `/reservar`). **Obrigatória em produção**: sem ela, com `VERCEL_ENV=production` (ou `TURNSTILE_OBRIGATORIO=true`), a reserva responde 503 |
+| `IP_HASH_SALT` | Sal do hash do IP usado no limite de reservas abertas por pessoa (o IP em si nunca é gravado) |
+| `RIFA_FLUXO_LEGADO` | `false` desliga o fluxo antigo (pagar antes de escolher: `GET /criar-pagamento` e `POST /criar-pix` sem `reservaId` → 410). Vazio = ligado |
 
 ⚠️ Todo valor de `process.env` usado neste projeto é lido **dentro de uma função**, nunca no corpo do módulo — ler no topo do arquivo quebra o processo inteiro assim que esse módulo é importado (isso já mordeu o projeto várias vezes: `MercadoPagoConfig`, `Resend`, `FRONTEND_URL.startsWith(...)`). Ao adicionar uma variável de ambiente nova, mantenha esse padrão.
 
@@ -113,7 +116,13 @@ Cadastre a URL gerada no painel do Mercado Pago (**Webhooks → aba Modo de prod
 | `GET` | `/api/rifa/status-pix/:paymentId?ref=` | rate limit | Status do Pix da rifa (`PENDENTE`, `APROVADO`, `CANCELADO`, `EXPIRADO`); `ref` = `rastreioId` |
 | `GET` | `/api/rifa/numeros-ocupados` | — | Lista os números já escolhidos, pra pintar a grade |
 | `POST` | `/api/rifa/confirmar-numero` | `Bearer <token>` | Reserva um número pro pagamento dono do token |
-| `POST` | `/api/rifa/reenviar-email` | — | Reenvia o e-mail de confirmação de um pagamento já resolvido |
+| `POST` | `/api/rifa/reenviar-email` | `Bearer <token>` (escolha ou `tokenReenvio`) + rate limit | Reenvia o e-mail de confirmação do pagamento do token |
+| `POST` | `/api/rifa/reservar` | Turnstile + rate limit | Reserva de 1 a 10 números por 15 min (`{ numeros, turnstileToken, utm* }`) → `{ reservaId, numeros, indisponiveis, expiraEm, valor }`; 409 se nenhum estava livre |
+| `GET` | `/api/rifa/reserva/:reservaId` | rate limit | Estado da reserva (retomar a página), sem dados pessoais |
+| `POST` | `/api/rifa/liberar-reserva` | rate limit | Devolve os números ao quadro; cancela o Pix pendente da reserva |
+| `POST` | `/api/rifa/criar-pix` com `reservaId` | rate limit | Pix do total da reserva (`{ reservaId, nome, email, phone, aceiteTermos }`), validade de 30 min |
+| `POST` | `/api/rifa/criar-pagamento` | rate limit | Link do cartão (Checkout Pro) do total da reserva, mesma validade do Pix |
+| `GET` | `/api/rifa/compra?payment_id=&ref=` | rate limit | Volta do cartão: confere o pagamento no MP e devolve a compra (`ref` = `external_reference` = pedido) |
 | `GET` | `/api/rifa/tarefas-diarias` | `Bearer <CRON_SECRET>` | Cron da Vercel, 1×/dia: confere os PENDENTE vencidos no MP, envia os lembretes de escolha e sorteia os números com prazo vencido |
 | `GET` | `/api/rifa/buscar-por-email` | — | Recupera o `payment_id` de uma compra perdida, por e-mail |
 
@@ -127,6 +136,18 @@ Cadastre a URL gerada no painel do Mercado Pago (**Webhooks → aba Modo de prod
 - **A confirmação de número nunca confia em `paymentId` vindo do corpo da requisição** — só o que está codificado dentro do JWT verificado pelo middleware conta.
 - **O webhook responde 200 antes de terminar de processar** (ack imediato, processamento em segundo plano) — por isso o controller nunca deve tentar responder de novo depois disso.
 - **Duas fontes confirmam um pagamento**: o webhook (assíncrono) e a checagem ao vivo em `verificar-pagamento` (síncrona, fallback pra quando o webhook ainda não chegou). As duas convergem no mesmo `registrarPagamentoRifa`, então nunca duplicam.
+
+## Compra com reserva (escolhe os números antes de pagar)
+
+A Ação de Natal (`/rifa` no frontend, com `VITE_FLUXO_COMPLETO=true`) deixa a pessoa escolher de 1 a 10 números no quadro antes de pagar.
+
+1. **Reserva** (`POST /reservar`): cada número vira um documento `RESERVADO` em `rifas`, com `paymentId = PEDIDO-<pedidoId>-<NNN>` e `reservaExpiraEm` = agora + 15 min. O **mesmo índice único** `{ claimedNumber, teste }` que protege a escolha antiga, o sorteio e o cadastro manual do painel decide quem fica com cada número: duas pessoas ao mesmo tempo → um insert passa, o outro recebe E11000 e o número volta em `indisponiveis`. A compra fica em `pedidos` (`models/Pedido.ts`), com `_id` = UUID aleatório (`reservaId`).
+2. **Pagamento** (`criar-pix` / `criar-pagamento` com `reservaId`): valor = quantidade × R$ 100, calculado aqui. O Pix (`date_of_expiration`) e o link do cartão (`expiration_date_to`) **expiram no mesmo instante: agora + 30 min** (o MP não aceita Pix com menos). A reserva passa a valer até esse instante + 2 min. Só um pagamento ativo por reserva: gerar outro cancela o Pix anterior / expira o link anterior (máximo 3 por reserva).
+3. **Confirmação** (`processarPagamentoPedido`, chamado pelo webhook, pela consulta do Pix e pela volta do cartão; idempotente): confere o valor pago, converte os `RESERVADO` em `APROVADO` com nome/e-mail/WhatsApp e manda **um** e-mail com todos os números. Se a reserva venceu e alguém pegou um número antes da aprovação, esse número vira um registro `APROVADO` sem número, que segue o fluxo antigo (link de escolha, lembretes, sorteio aos 20 dias) — o pedido fica `PAGO_PARCIAL`. Pagamento em dobro e valor divergente viram `alertas` no pedido (painel).
+4. **Expiração**: reserva vencida conta como livre em toda consulta; o índice TTL e as tarefas apagam os documentos e marcam o pedido `EXPIRADO`. Depois de 7 dias, nome, e-mail, WhatsApp e hash do IP dos pedidos não pagos são apagados (LGPD).
+5. **Anti-abuso**: Turnstile, 10 reservas/15 min por IP, no máximo 2 reservas abertas por pessoa e 10 números por compra.
+
+Depois do deploy: `npm run migrate:indices -- --apply` (índice TTL das reservas e índices de `pedidos`).
 
 ## Testes
 
@@ -188,6 +209,23 @@ Cucumber + `supertest` batendo direto no `app` do Express (sem subir servidor nu
 
 **`financeiro-painel.feature`**
 - O que vai ao painel: rifa (cartão e Pix) como `RIFA_SOLIDARIA`, doação fora dela, valor líquido, bruto enquanto pendente, data da aprovação
+
+**`reserva.feature`**
+- Reserva de números livres; **20 pessoas no mesmo número ao mesmo tempo → 1 vence**; reserva × escolha antiga × cadastro manual no mesmo número → 1 documento
+- Reserva parcial (`indisponiveis`), todos ocupados (409), números inválidos e injeção NoSQL (400)
+- Turnstile ausente/inválido (403), obrigatório sem chave (503), limite por IP (429) e de reservas abertas (429)
+- Reserva vencida volta ao quadro; ativa aparece ocupada; vaga de quem pagou no fluxo antigo é respeitada
+- Liberar (cancela o Pix), não liberar compra paga, consulta sem dados pessoais, reserva de teste não bloqueia número real
+
+**`pedido-pagamento.feature`**
+- Pix e cartão com o valor total e a **mesma validade de 30 min**; corpo real enviado ao MP (quantidade, `expiration_date_to`, `back_urls`, `external_reference`, sem Pix no cartão)
+- Trocar Pix → cartão cancela o Pix; dois cliques → um Pix ativo; contato inválido/sem aceite (400); reserva vencida (410)
+- Webhook confirma com os dados de quem comprou, um e-mail só (webhook repetido, ou webhook + status + volta do cartão ao mesmo tempo)
+- Valor divergente não confirma; pago tarde com número tomado → escolhe outro pelo fluxo antigo; pagamento em dobro → alerta de estorno
+- O id do pagamento de uma compra não libera mais um número; volta do cartão aprovada/em análise/pedido errado; expiração e anonimização após 7 dias
+
+**`seguranca.feature`**
+- Reenvio de e-mail preso ao token; token de reenvio não escolhe número; `alg none` recusado; helmet; corpo grande (413) e malformado (400)
 
 **`retorno-rifa.feature`**
 - As `back_urls` da preferência da rifa apontam para `/rifa/pagamento-aprovado`, `/rifa/pagamento-pendente` e `/rifa/pagamento-recusado` — separadas das páginas de retorno da doação (`/doar/pagamento-aprovado`, `/doar/pagamento-pendente` e `/doar/pagamento-recusado`)

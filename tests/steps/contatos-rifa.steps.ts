@@ -5,10 +5,11 @@ import { registrarPagamentoFakeNaAPI } from "../support/mercadoPagoFake.js";
 
 const DIA_MS = 24 * 60 * 60_000;
 const DESCRICAO = "Número da Rifa Solidária — Gatil Irmã Francisca";
+const DATA_APROVACAO = "2026-09-21T18:35:21.000-03:00";
 
 Given(
-    "que existe um Pix da rifa {string} aprovado sem payer.email, com email_contato {string} e pago por {string}",
-    function (paymentId: string, email: string, nome: string) {
+    "que existe um Pix da rifa {string} aprovado com o payer.email mascarado, com email_contato {string} e vindo do banco {string}",
+    function (paymentId: string, email: string, banco: string) {
         registrarPagamentoFakeNaAPI({
             id: paymentId,
             status: "approved",
@@ -17,9 +18,11 @@ Given(
             description: DESCRICAO,
             payment_method_id: "pix",
             payment_type_id: "bank_transfer",
-            date_approved: new Date().toISOString(),
-            payer: { email: null },
-            point_of_interaction: { transaction_data: { bank_info: { payer: { long_name: nome } } } },
+            date_approved: DATA_APROVACAO,
+            // É assim que o MP devolve o Pix: e-mail mascarado e, no lugar do
+            // nome da pessoa, só o banco de origem.
+            payer: { email: "XXXXXXXXXXX" },
+            point_of_interaction: { transaction_data: { bank_info: { payer: { long_name: banco } } } },
             metadata: { tipo: "RIFA", utm_campaign: "RIFA_SOLIDARIA", email_contato: email },
         });
     }
@@ -113,4 +116,18 @@ Then("o pagamento {string} deve estar sem e-mail", async function (paymentId: st
 Then("o contato do pagamento {string} deve estar marcado como conferido", async function (paymentId: string) {
     const doc = await Rifa.findOne({ paymentId });
     assert.ok(doc?.contatoConferidoEm instanceof Date);
+});
+
+Then(
+    "o pagamento {string} deve ter o banco {string}, sem nome do pagador",
+    async function (paymentId: string, banco: string) {
+        const doc = await Rifa.findOne({ paymentId });
+        assert.equal(doc?.bancoPagador, banco);
+        assert.equal(doc?.nomePagador, null);
+    }
+);
+
+Then("o pagamento {string} deve ter a data real do pagamento", async function (paymentId: string) {
+    const doc = await Rifa.findOne({ paymentId });
+    assert.equal(doc?.dataPagamento?.toISOString(), new Date(DATA_APROVACAO).toISOString());
 });
