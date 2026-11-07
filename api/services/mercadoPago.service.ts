@@ -2,6 +2,7 @@ import * as RifaTypes from "../types/rifa.types.js";
 import type { IRifa } from "../models/Rifa.js";
 import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
 import { sincronizarPagamentoRifa } from "./rifa.service.js";
+import { processarPagamentoPedido } from "./pedido.service.js";
 import { ConflictError } from "../utils/errors.js";
 import { UTM_CAMPAIGN } from "../types/origem.types.js";
 import { registrarConversaoDoacao } from "./conversao.service.js";
@@ -127,7 +128,13 @@ export const processarNotificacaoPagamento = async (body: any): Promise<void> =>
 
         // CENÁRIO DA RIFA SOLIDÁRIA
         if (ehPagamentoRifa(pagamento)) {
-            await sincronizarPagamentoRifa(String(pagamento.id), dadosRifaDoPagamento(pagamento));
+            if (pagamento.metadata?.pedido_id) {
+                // Compra com reserva: confirma os números já reservados. Não cria
+                // o registro do fluxo antigo (ele ocuparia mais uma vaga).
+                await processarPagamentoPedido(pagamento);
+            } else {
+                await sincronizarPagamentoRifa(String(pagamento.id), dadosRifaDoPagamento(pagamento));
+            }
         }
 
         // CENÁRIO DA DOAÇÃO — conversão para Meta/GA4. Falha aqui não pode

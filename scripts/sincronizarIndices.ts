@@ -12,6 +12,7 @@
 import "dotenv/config";
 import mongoose from "mongoose";
 import Rifa from "../api/models/Rifa.js";
+import Pedido from "../api/models/Pedido.js";
 
 const aplicar = process.argv.includes("--apply");
 
@@ -24,14 +25,20 @@ async function main() {
 
     await mongoose.connect(mongoUri, { dbName, autoIndex: false });
 
-    const { toCreate, toDrop } = await Rifa.diffIndexes();
-    console.log("Índices a criar:", toCreate.length ? JSON.stringify(toCreate) : "nenhum");
-    console.log("Índices a remover:", toDrop.length ? toDrop.join(", ") : "nenhum");
+    let mudancas = 0;
+    // rifas: índice único do número e TTL das reservas vencidas.
+    // pedidos: compras com reserva (models/Pedido.ts).
+    for (const modelo of [Rifa, Pedido] as const) {
+        const { toCreate, toDrop } = await (modelo as typeof Rifa).diffIndexes();
+        mudancas += toCreate.length + toDrop.length;
+        console.log(`[${modelo.collection.name}] índices a criar:`, toCreate.length ? JSON.stringify(toCreate) : "nenhum");
+        console.log(`[${modelo.collection.name}] índices a remover:`, toDrop.length ? toDrop.join(", ") : "nenhum");
+        if (aplicar) await (modelo as typeof Rifa).syncIndexes();
+    }
 
     if (aplicar) {
-        await Rifa.syncIndexes();
         console.log("Índices sincronizados.");
-    } else if (toCreate.length || toDrop.length) {
+    } else if (mudancas) {
         console.log("Nada foi alterado. Rode de novo com --apply para aplicar.");
     }
 

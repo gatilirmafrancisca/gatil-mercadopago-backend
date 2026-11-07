@@ -1,6 +1,24 @@
 import {type NextFunction, type Request, type Response} from "express";
 import { criarPreferenciaRifa } from "../mercadoPago/criarPreferenciaRifa.js";
-import { confirmarNumeroRifa, consultarStatusPixRifa, criarPixRifa, executarTarefasNoUso, getAllRifasService, haNumerosDisponiveis, tarefasDaRifa } from "../services/rifa.service.js";
+import { chavePixTesteValida, confirmarNumeroRifa, consultarStatusPixRifa, criarPixRifa, executarTarefasNoUso, getAllRifasService, haNumerosDisponiveis, tarefasDaRifa } from "../services/rifa.service.js";
+import * as pedidoService from "../services/pedido.service.js";
+import { ForbiddenError, GoneError } from "../utils/errors.js";
+
+/**
+ * Fluxo antigo (paga primeiro, escolhe depois): GET /criar-pagamento e
+ * POST /criar-pix sem reservaId. Fica ligado enquanto RIFA_FLUXO_LEGADO não
+ * for "false", para poder voltar atrás se o fluxo com reserva der problema.
+ */
+const fluxoLegadoAtivo = () => process.env.RIFA_FLUXO_LEGADO !== "false";
+const erroFluxoLegado = () => new GoneError("Escolha seus números no quadro antes de pagar.");
+
+/** Header x-pix-teste: ausente = normal; igual a PIX_TESTE_CHAVE = teste; outro valor = recusado. */
+function modoTeste(req: Request): boolean {
+    const chave = req.header("x-pix-teste");
+    if (chave === undefined) return false;
+    if (!chavePixTesteValida(chave)) throw new ForbiddenError("Chave de teste inválida.");
+    return true;
+}
 import Rifa from "../models/Rifa.js";
 import type { AuthenticatedRequest } from "../middlewares/token.middleware.js";
 import { enviarEmailConfirmacao } from "../services/email.service.js";
@@ -24,6 +42,8 @@ export const getPreferencia = async(req: Request<UtmMetadata, any, any>, res: Re
 
         validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
 
+        if (!fluxoLegadoAtivo()) throw erroFluxoLegado();
+
         await executarTarefasNoUso();
 
         if (!(await haNumerosDisponiveis())) {
@@ -39,9 +59,17 @@ export const getPreferencia = async(req: Request<UtmMetadata, any, any>, res: Re
 
 }
 
-export const criarPix = async(req: Request<any, any, { email: string } & UtmMetadata>, res: Response, next: NextFunction) => {
+export const criarPix = async(req: Request<any, any, { email: string; reservaId?: unknown } & UtmMetadata & Record<string, unknown>>, res: Response, next: NextFunction) => {
 
     try {
+
+        // Compra com reserva: Pix do total da reserva.
+        if (req.body?.reservaId !== undefined) {
+            const resposta = await pedidoService.criarPagamentoPedido({ reservaId: req.body.reservaId, metodo: "pix", corpo: req.body });
+            return res.status(resposta.status).json({ message: resposta.message, data: resposta.data });
+        }
+
+        if (!fluxoLegadoAtivo()) throw erroFluxoLegado();
 
         const { email, utmSource, utmMedium, utmCampaign } = req.body ?? {};
 
@@ -54,6 +82,63 @@ export const criarPix = async(req: Request<any, any, { email: string } & UtmMeta
         const resposta = await criarPixRifa({ email, origem, chaveTeste: req.header("x-pix-teste") });
         return res.status(resposta.status).json({ message: resposta.message, data: resposta.data });
 
+    } catch (error) {
+        next(error);
+    }
+}
+
+// ---------- Compra com reserva (escolhe os números antes de pagar) ----------
+
+export const reservar = async(req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { numeros, utmSource, utmMedium } = req.body ?? {};
+        const resposta = await pedidoService.reservarNumeros({
+            numeros,
+            origem: { utmSource: utmSource ?? null, utmMedium: utmMedium ?? null },
+            ...(req.ip ? { ip: req.ip } : {}),
+            teste: modoTeste(req),
+        });
+        return res.status(resposta.status).json({ message: resposta.message, data: resposta.data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export const buscarReserva = async(req: Request<{ reservaId: string }>, res: Response, next: NextFunction) => {
+    try {
+        const resposta = await pedidoService.buscarReserva(req.params.reservaId);
+        return res.status(resposta.status).json({ message: resposta.message, data: resposta.data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export const liberarReserva = async(req: Request, res: Response, next: NextFunction) => {
+    try {
+        const resposta = await pedidoService.liberarReserva(req.body?.reservaId);
+        return res.status(resposta.status).json({ message: resposta.message, data: resposta.data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+/** Cartão (Checkout Pro) do total da reserva. */
+export const criarPagamentoCartao = async(req: Request, res: Response, next: NextFunction) => {
+    try {
+        const resposta = await pedidoService.criarPagamentoPedido({ reservaId: req.body?.reservaId, metodo: "cartao", corpo: req.body });
+        const data = resposta.data as { initPoint: string };
+        // initPoint no topo: o front lê { initPoint } como no fluxo antigo.
+        return res.status(resposta.status).json({ message: resposta.message, initPoint: data.initPoint, data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+/** Volta do cartão: GET /compra?payment_id=&ref=<external_reference> */
+export const consultarCompra = async(req: Request, res: Response, next: NextFunction) => {
+    try {
+        const resposta = await pedidoService.consultarCompra(req.query.payment_id, req.query.ref);
+        return res.status(resposta.status).json({ message: resposta.message, data: resposta.data });
     } catch (error) {
         next(error);
     }
@@ -150,7 +235,7 @@ export const tarefasDiarias = async(req: Request, res: Response, next: NextFunct
             return res.status(401).json({ message: "Não autorizado." });
         }
 
-        const { pendentes, contatos, escolhas } = await tarefasDaRifa({ limite: LIMITE_TAREFAS_DIARIAS });
+        const { pendentes, contatos, escolhas, pedidos } = await tarefasDaRifa({ limite: LIMITE_TAREFAS_DIARIAS });
         const atualizados = pendentes.filter((c) => c.aplicado);
 
         console.info(
@@ -166,6 +251,7 @@ export const tarefasDiarias = async(req: Request, res: Response, next: NextFunct
                 contatos,
                 lembretes: escolhas.lembretes,
                 sorteados: escolhas.sorteados,
+                pedidos,
             },
         });
 

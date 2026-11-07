@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import type { ReactElement } from "react";
 import { ConfirmacaoNumeroEmail } from "../emails/confirmacaoNumeroEmail.js";
 import { EscolhaNumeroEmail } from "../emails/escolhaNumeroEmail.js";
+import { ConfirmacaoPedidoEmail } from "../emails/confirmacaoPedidoEmail.js";
 
 // Igual fizemos com o MercadoPagoConfig: construir dentro da função,
 // não no topo do arquivo — senão qualquer import desse módulo (mesmo
@@ -113,4 +114,31 @@ export async function enviarEmailEscolhaNumero({
             : `${prefixoTeste(teste)}Escolha seu número da Rifa Solidária — faltam ${diasRestantes} dias`,
         react: EscolhaNumeroEmail({ linkEscolha, diasRestantes, prazoFormatado }),
     }, "escolha de número");
+}
+
+interface EnviarEmailConfirmacaoPedidoArgs {
+    name: string;
+    email: string;
+    numeros: number[];
+    /** Links absolutos para escolher os números que se perderam. */
+    linksEscolha: string[];
+    teste?: boolean;
+}
+
+/** Confirmação de uma compra com reserva (um ou vários números). Nunca lança erro. */
+export async function enviarEmailConfirmacaoPedido({
+    name,
+    email,
+    numeros,
+    linksEscolha,
+    teste = false,
+}: EnviarEmailConfirmacaoPedidoArgs): Promise<boolean> {
+    const lista = numeros.map((n) => String(n).padStart(3, "0")).join(", ");
+    return enviar({
+        to: email,
+        subject: numeros.length
+            ? `${prefixoTeste(teste)}${numeros.length === 1 ? "Seu número" : "Seus números"} na Ação Solidária do Gatil: ${lista}`
+            : `${prefixoTeste(teste)}Pagamento confirmado na Ação Solidária do Gatil — escolha seus números`,
+        react: ConfirmacaoPedidoEmail({ name, numeros, linksEscolha }),
+    }, "confirmação do pedido");
 }

@@ -27,7 +27,11 @@ export function errorHandler(err: any, req: Request, res: Response, next: NextFu
     }
 
     if (err.name === "ConflictError") {
-        return res.status(409).json({ message: err.message });
+        return res.status(409).json({ message: err.message, ...(err.dados ?? {}) });
+    }
+
+    if (err.name === "TooManyRequestsError") {
+        return res.status(429).json({ message: err.message });
     }
 
     if (err.name === "GoneError") {

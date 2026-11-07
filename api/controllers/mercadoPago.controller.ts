@@ -2,6 +2,7 @@ import { type Request, type Response } from "express";
 import { verificarAssinaturaMP } from "../mercadoPago/verificarAssinatura.js";
 import { processarNotificacaoPagamento, sincronizarFinanceiroDoPagamento, ehPagamentoRifa, dadosRifaDoPagamento } from "../services/mercadoPago.service.js";
 import { sincronizarPagamentoRifa } from "../services/rifa.service.js";
+import { processarPagamentoPedido } from "../services/pedido.service.js";
 import Rifa, { type IRifa } from "../models/Rifa.js";
 import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
 import * as RifaTypes from "../types/rifa.types.js";
@@ -36,6 +37,12 @@ export const VerificarPagamentoController = async (req: Request, res: Response) 
 
         let pagamento = await Rifa.findOne({ paymentId });
 
+        // Número de um pedido (PEDIDO-…): só existe no banco. Os que ainda vão
+        // escolher número estão APROVADO; o resto não libera escolha.
+        if (paymentId.startsWith("PEDIDO-") && (!pagamento || pagamento.status !== "APROVADO")) {
+            return res.status(402).json({ message: "Pagamento não aprovado." });
+        }
+
         // Sem registro (webhook ainda não chegou) ou registro ainda não
         // aprovado (ex: PIX gravado como PENDENTE e o webhook de
         // aprovação atrasou/falhou): consulta o dado real no MP.
@@ -51,6 +58,20 @@ export const VerificarPagamentoController = async (req: Request, res: Response) 
 
             if (dadoReal.status !== "approved") {
                 return res.status(402).json({ message: "Pagamento não aprovado." });
+            }
+
+            // Compra com reserva: os números já foram escolhidos antes de pagar.
+            // Sem isto, o id do pagamento liberaria a escolha de mais um número.
+            if (dadoReal.metadata?.pedido_id) {
+                const compra = await processarPagamentoPedido(dadoReal);
+                await sincronizarFinanceiroDoPagamento(dadoReal).catch((err) =>
+                    console.error("[verificar-pagamento] falha ao sincronizar painel", paymentId, err)
+                );
+                return res.status(409).json({
+                    message: "Esta compra já tem os números escolhidos.",
+                    pedidoId: compra?.reservaId ?? String(dadoReal.metadata.pedido_id),
+                    numeros: compra?.numerosConfirmados ?? [],
+                });
             }
 
             await sincronizarPagamentoRifa(paymentId, dadosRifaDoPagamento(dadoReal));
