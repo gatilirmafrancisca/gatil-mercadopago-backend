@@ -15,3 +15,10 @@ export const criarLimiteStatusPix = () => rateLimit({
     max: 60,
     message: { message: "Muitas consultas seguidas. Aguarde um minuto." },
 });
+
+/** Reenvio do e-mail de confirmação: cada um é um e-mail mandado de verdade. */
+export const criarLimiteReenvio = () => rateLimit({
+    windowMs: 15 * 60_000,
+    max: 5,
+    message: { message: "Muitos reenvios seguidos. Aguarde alguns minutos e tente de novo." },
+});

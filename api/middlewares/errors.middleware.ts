@@ -30,6 +30,19 @@ export function errorHandler(err: any, req: Request, res: Response, next: NextFu
         return res.status(409).json({ message: err.message });
     }
 
+    if (err.name === "GoneError") {
+        return res.status(410).json({ message: err.message });
+    }
+
+    // Erros do express.json (corpo grande demais, JSON malformado): são do
+    // cliente, não do servidor.
+    if (err.type === "entity.too.large") {
+        return res.status(413).json({ message: "Requisição grande demais." });
+    }
+    if (err.type === "entity.parse.failed") {
+        return res.status(400).json({ message: "JSON inválido." });
+    }
+
     console.error("Error:", err);
     res.status(500).json({ message: "Internal Server Error." });
 

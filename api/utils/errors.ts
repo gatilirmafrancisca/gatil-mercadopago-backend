@@ -53,3 +53,11 @@ export class NotFoundError extends Error {
         this.name = "NotFoundError";
     }
 }
+/** O recurso existia mas não vale mais (ex: reserva vencida). */
+export class GoneError extends Error {
+
+    constructor(message: string) {
+        super(message);
+        this.name = "GoneError";
+    }
+}

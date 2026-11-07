@@ -5,9 +5,7 @@ import { sincronizarPagamentoRifa } from "../services/rifa.service.js";
 import Rifa, { type IRifa } from "../models/Rifa.js";
 import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
 import * as RifaTypes from "../types/rifa.types.js";
-import jwt from "jsonwebtoken";
-
-const { sign } = jwt;
+import { assinarTokenPagamento } from "../middlewares/token.middleware.js";
 
 export const WebhookController = async (req: Request, res: Response) => {
     const assinaturaValida = verificarAssinaturaMP({
@@ -80,12 +78,15 @@ export const VerificarPagamentoController = async (req: Request, res: Response) 
             // pra o frontend mostrar a confirmação de novo, em vez de
             // tratar isso como se o pagamento tivesse sido recusado.
 
-            return res.status(409).json({ message: "Este pagamento já escolheu um número.", claimedNumber: pagamento.claimedNumber });
+            // tokenReenvio: só serve pra reenviar o e-mail desse número.
+            return res.status(409).json({
+                message: "Este pagamento já escolheu um número.",
+                claimedNumber: pagamento.claimedNumber,
+                tokenReenvio: assinarTokenPagamento(paymentId, "reenviar", "15m"),
+            });
         }
 
-        const token = sign({ paymentId }, process.env.JWT_SECRET!, {
-        expiresIn: "30m",
-        });
+        const token = assinarTokenPagamento(paymentId, "escolher", "30m");
 
         res.json({ token });
     }

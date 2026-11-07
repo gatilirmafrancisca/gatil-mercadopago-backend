@@ -96,12 +96,17 @@ export const getAllRifas = async(_req: Request, res: Response, next: NextFunctio
     }
 }
 
-export const reenviarEmail = async(req: Request, res: Response, next: NextFunction) => {
+export const reenviarEmail = async(req: AuthenticatedRequest, res: Response, next: NextFunction) => {
 
     try {
 
-        const paymentId = String(req.body?.paymentId ?? "");
-        if (!paymentId) return res.status(400).json({ message: "paymentId ausente." });
+        // O pagamento vem do token, nunca do corpo: senão qualquer token
+        // reenviava o e-mail (com o nome e o número) de outro pagamento.
+        const paymentId = req.paymentId!;
+        const pedido = req.body?.paymentId;
+        if (pedido !== undefined && String(pedido) !== paymentId) {
+            return res.status(403).json({ message: "Esse token não é deste pagamento." });
+        }
 
         const pagamento = await Rifa.findOne({ paymentId });
 
