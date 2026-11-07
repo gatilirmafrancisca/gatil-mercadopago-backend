@@ -2,6 +2,8 @@ import { Before, After, BeforeAll } from "@cucumber/cucumber";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
 import Rifa from "../../api/models/Rifa.js";
+import Pedido from "../../api/models/Pedido.js";
+import { turnstileClient } from "../../api/middlewares/turnstile.js";
 import { resetarFakesMercadoPago } from "../support/mercadoPagoFake.js";
 import { PAINEL_URL_TESTE, resetarPainelFake } from "../support/painelFake.js";
 import { resetarEmailFake } from "../support/emailFake.js";
@@ -41,6 +43,7 @@ Before(async function (this: any) {
     // único de claimedNumber ainda não existe, e testes de corrida
     // conseguem passar dos dois lados por pura sorte de timing.
     await Rifa.init();
+    await Pedido.init();
 
     resetarFakesMercadoPago();
     resetarPainelFake();
@@ -50,6 +53,11 @@ Before(async function (this: any) {
     // tarefas da rifa, e sem o modo de Pix de teste ligado.
     tarefasRifa.ultimaExecucao = 0;
     delete process.env.PIX_TESTE_CHAVE;
+    // Turnstile desligado por padrão; os cenários anti-robô ligam.
+    delete process.env.TURNSTILE_SECRET;
+    delete process.env.TURNSTILE_OBRIGATORIO;
+    delete process.env.RIFA_FLUXO_LEGADO;
+    turnstileClient.verificar = async (token) => ({ success: token === "token-humano" });
 });
 
 After(async function () {
