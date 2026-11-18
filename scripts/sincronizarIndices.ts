@@ -13,6 +13,7 @@ import "dotenv/config";
 import mongoose from "mongoose";
 import Rifa from "../api/models/Rifa.js";
 import Pedido from "../api/models/Pedido.js";
+import UtmTag from "../api/models/UtmTag.js";
 
 const aplicar = process.argv.includes("--apply");
 
@@ -28,7 +29,8 @@ async function main() {
     let mudancas = 0;
     // rifas: índice único do número e TTL das reservas vencidas.
     // pedidos: compras com reserva (models/Pedido.ts).
-    for (const modelo of [Rifa, Pedido] as const) {
+    // utmtags: índice único { categoria, codigo } (as tags vêm do painel).
+    for (const modelo of [Rifa, Pedido, UtmTag] as const) {
         const { toCreate, toDrop } = await (modelo as typeof Rifa).diffIndexes();
         mudancas += toCreate.length + toDrop.length;
         console.log(`[${modelo.collection.name}] índices a criar:`, toCreate.length ? JSON.stringify(toCreate) : "nenhum");

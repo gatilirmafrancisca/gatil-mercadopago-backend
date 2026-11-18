@@ -4,7 +4,7 @@ import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
 import { sincronizarPagamentoRifa } from "./rifa.service.js";
 import { processarPagamentoPedido } from "./pedido.service.js";
 import { ConflictError } from "../utils/errors.js";
-import { UTM_CAMPAIGN } from "../types/origem.types.js";
+import { CAMPANHA_RIFA } from "../types/origem.types.js";
 import { registrarConversaoDoacao } from "./conversao.service.js";
 import { ehEmailValido } from "../utils/rifavalidar.js";
 
@@ -38,7 +38,6 @@ export const mapearStatusMP = (statusMP: string): RifaTypes.StatusRifaType => {
 
 type Pagamento = Awaited<ReturnType<typeof buscarPagamento>>;
 
-const CAMPANHA_RIFA = UTM_CAMPAIGN[1];
 
 /**
  * Pagamento da rifa: criado pela preferência ou pelo Pix da rifa (tipo

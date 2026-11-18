@@ -266,7 +266,7 @@ export const criarPixRifa = async ({ email, origem = {}, chaveTeste }: CriarPixR
 
         const origemNormalizada = normalizarParametros(origem);
         const { utmSource, utmMedium, utmCampaign } = origemNormalizada;
-        validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
+        await validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
 
         await executarTarefasNoUso();
 

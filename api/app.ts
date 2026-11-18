@@ -5,6 +5,7 @@ import { errorHandler } from "./middlewares/errors.middleware.js";
 import mercadoPagoRoute from "./routes/mercadoPago.route.js";
 import rifaRoute from "./routes/rifa.route.js";
 import doacaoRoute from "./routes/doacao.route.js";
+import utmRoute from "./routes/utm.route.js";
 
 export const app = express();
 
@@ -24,6 +25,7 @@ app.use(
 app.use("/mercadopago", mercadoPagoRoute);
 app.use("/api/rifa", rifaRoute);
 app.use("/api/doacao", doacaoRoute);
+app.use("/api/utm", utmRoute);
 
 app.get("/", (req: Request, res: Response) => {
   res.send({ message: "App Working" });
