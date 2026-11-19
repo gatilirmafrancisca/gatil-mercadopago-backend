@@ -3,7 +3,8 @@ import { mercadoPagoPixClient, PIX_EXPIRACAO_MINUTOS } from "../mercadoPago/cria
 import { buscarPagamento } from "../mercadoPago/buscarPagamento.js";
 import { mapearStatusMP, sincronizarFinanceiroDoPagamento } from "./mercadoPago.service.js";
 import { registrarConversaoDoacao } from "./conversao.service.js";
-import { UTM_SOURCE, type UtmSource, type UtmMetadata, UTM_MEDIUM, type UtmMedium, type UtmCampaign, UTM_CAMPAIGN } from "../types/origem.types.js";
+import type { UtmSource, UtmMetadata, UtmMedium, UtmCampaign, UtmCategoria } from "../types/origem.types.js";
+import { obterTagsAtivas, tagAtiva } from "./utm.service.js";
 import type ResponseType from "../types/response.type.js";
 import { normalizarRastreio, type RastreioMetadata } from "../types/rastreio.types.js";
 import { InvalidEnumError, InvalidIdError, MissingParamsError, NotFoundError } from "../utils/errors.js";
@@ -11,29 +12,34 @@ import { InvalidEnumError, InvalidIdError, MissingParamsError, NotFoundError } f
 
 
 
-export function validarParametros(utmSource: UtmSource | null, utmMedium: UtmMedium | null, utmCampaign: UtmCampaign | null) {
+/**
+ * Confere as UTMs contra as tags ativas da coleção `utmtags` (gerenciada no
+ * painel). Nulo/vazio passa. As mensagens são as mesmas de antes.
+ *
+ * É async: quem chamar PRECISA usar await, senão a validação não barra nada.
+ */
+export async function validarParametros(utmSource: UtmSource | null, utmMedium: UtmMedium | null, utmCampaign: UtmCampaign | null): Promise<void> {
 
+    const invalida = async (categoria: UtmCategoria, valor: string | null | undefined) =>
+        valor !== undefined && valor !== null && !(await tagAtiva(categoria, valor));
 
-    if (utmSource !== undefined && utmSource !== null && !UTM_SOURCE.includes(utmSource as UtmSource)) {
+    if (await invalida("SOURCE", utmSource)) {
+        const { SOURCE } = await obterTagsAtivas();
         throw new InvalidEnumError(
-            `utmSource inválido '${String(utmSource)}'. Valores permitidos: ${UTM_SOURCE.join(", ")}.`,
+            `utmSource inválido '${String(utmSource)}'. Valores permitidos: ${SOURCE.join(", ")}.`,
         );
     }
 
-    if (utmMedium !== undefined && utmMedium !== null && !UTM_MEDIUM.includes(utmMedium as UtmMedium)) {
-
+    if (await invalida("MEDIUM", utmMedium)) {
         throw new InvalidEnumError(
             `utmMedium inválido '${String(utmMedium)}'. Deve ser uma string ou nulo.`,
         );
-
     }
 
-    if (utmCampaign !== undefined && utmCampaign !== null && !UTM_CAMPAIGN.includes(utmCampaign as UtmCampaign)) {
-
+    if (await invalida("CAMPAIGN", utmCampaign)) {
         throw new InvalidEnumError(
             `utmCampaign inválido '${String(utmCampaign)}'. Deve ser uma string ou nulo.`,
         );
-
     }
 
 }
@@ -77,7 +83,7 @@ export const criarPreferenciaDoacao = async (
 
         const { utmSource, utmMedium, utmCampaign } = normalizarParametros(origem);
 
-        validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
+        await validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
 
         const origemNormalizada: UtmMetadata = { 
             ...origem, 
@@ -265,7 +271,7 @@ export const criarPix = async ({
 
         const origemNormalizada = normalizarParametros(origem);
         const { utmSource, utmMedium, utmCampaign } = origemNormalizada;
-        validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
+        await validarParametros(utmSource as UtmSource | null, utmMedium as UtmMedium | null, utmCampaign as UtmCampaign | null);
 
         const pagamento = await mercadoPagoPixClient.criar({
             valor: valorPix,

@@ -3,6 +3,8 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
 import Rifa from "../../api/models/Rifa.js";
 import Pedido from "../../api/models/Pedido.js";
+import UtmTag from "../../api/models/UtmTag.js";
+import { limparCacheUtm } from "../../api/services/utm.service.js";
 import { turnstileClient } from "../../api/middlewares/turnstile.js";
 import { resetarFakesMercadoPago } from "../support/mercadoPagoFake.js";
 import { PAINEL_URL_TESTE, resetarPainelFake } from "../support/painelFake.js";
@@ -44,6 +46,9 @@ Before(async function (this: any) {
     // conseguem passar dos dois lados por pura sorte de timing.
     await Rifa.init();
     await Pedido.init();
+    await UtmTag.init();
+    // Cache das tags de UTM é por processo: cada cenário começa do banco.
+    limparCacheUtm();
 
     resetarFakesMercadoPago();
     resetarPainelFake();

@@ -97,9 +97,9 @@ export function validarContato(corpo: Record<string, unknown> | undefined): Cont
     return { nome, email, phone: digitos };
 }
 
-function origemValidada(origem: UtmMetadata) {
+async function origemValidada(origem: UtmMetadata) {
     const normalizada = normalizarParametros(origem);
-    validarParametros(normalizada.utmSource as UtmSource | null, normalizada.utmMedium as UtmMedium | null, null);
+    await validarParametros(normalizada.utmSource as UtmSource | null, normalizada.utmMedium as UtmMedium | null, null);
     return { utmSource: normalizada.utmSource ?? null, utmMedium: normalizada.utmMedium ?? null };
 }
 
@@ -183,7 +183,7 @@ interface ReservarArgs {
 export async function reservarNumeros({ numeros, origem = {}, ip, teste = false }: ReservarArgs): Promise<ResponseType> {
 
     const pedidos = validarNumerosPedido(numeros);
-    const { utmSource, utmMedium } = origemValidada(origem);
+    const { utmSource, utmMedium } = await origemValidada(origem);
     const ipHash = hashIp(ip);
     const agora = new Date();
 
